@@ -32,6 +32,10 @@ public:
 
 	Draw::DrawContext *GetDrawContext() override { return draw_; }
 
+	// Expose GL context handles for OpenXR binding
+	HDC GetHDC() const { return hDC; }
+	HGLRC GetHGLRC() const { return hRC; }
+
 private:
 	void ReleaseGLContext();
 

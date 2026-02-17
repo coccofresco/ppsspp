@@ -127,14 +127,41 @@ VR app flow integration
 */
 
 bool IsVREnabled() {
-	// For now, let the OPENXR build flag control enablement.
-	// This will change.
 #ifdef OPENXR
+#if XR_USE_PLATFORM_WIN32
+	// On Windows, VR is optional -- only enabled if OpenXR runtime initialized successfully
+	engine_t* engine = VR_GetEngine();
+	return engine && engine->appState.Instance != XR_NULL_HANDLE;
+#else
 	return true;
+#endif
 #else
 	return false;
 #endif
 }
+
+#if XR_USE_PLATFORM_WIN32
+void InitVROnWindows(HDC hDC, HGLRC hGLRC) {
+	// Set platform flags for PC VR
+	VR_SetPlatformFLag(VR_PLATFORM_CONTROLLER_QUEST, true);
+	VR_SetConfigFloat(VR_CONFIG_VIEWPORT_SUPERSAMPLING, 1.0f);
+
+	// Init VR -- pass nullptr for system (no Java VM on Windows)
+	VR_Init(nullptr, "PPSSPP", 0);
+
+	// Check if VR init succeeded (no headset or no runtime = graceful fallback)
+	engine_t* engine = VR_GetEngine();
+	if (!engine->appState.Instance) {
+		ALOGE("VR init failed: no OpenXR runtime or headset. Continuing as non-VR.");
+		return;
+	}
+
+	// Enter VR with the Win32 GL context binding
+	VR_EnterVR(engine, hDC, hGLRC);
+	IN_VRInit(engine);
+	VR_SetConfig(VR_CONFIG_VIEWPORT_VALID, false);
+}
+#endif
 
 #if PPSSPP_PLATFORM(ANDROID)
 void InitVROnAndroid(void* vm, void* activity, const char* system, int version, const char* name) {
@@ -178,7 +205,10 @@ void InitVROnAndroid(void* vm, void* activity, const char* system, int version, 
 void EnterVR(bool firstStart) {
 	if (firstStart) {
 		engine_t* engine = VR_GetEngine();
+#if !XR_USE_PLATFORM_WIN32
+		// On Android, call VR_EnterVR without GL binding (uses EGL current context)
 		VR_EnterVR(engine);
+#endif
 		IN_VRInit(engine);
 	}
 	VR_SetConfig(VR_CONFIG_VIEWPORT_VALID, false);

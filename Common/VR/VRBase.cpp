@@ -40,10 +40,14 @@ void VR_Init( void* system, const char* name, int version ) {
 #endif
 
 	std::vector<const char *> extensions;
-#ifdef XR_USE_GRAPHICS_API_OPENGL_ES
+#if XR_USE_GRAPHICS_API_OPENGL && !defined(ANDROID)
+	extensions.push_back(XR_KHR_OPENGL_ENABLE_EXTENSION_NAME);
+#elif defined(XR_USE_GRAPHICS_API_OPENGL_ES)
 	extensions.push_back(XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME);
 #endif
+#ifdef ANDROID
 	extensions.push_back(XR_KHR_COMPOSITION_LAYER_CYLINDER_EXTENSION_NAME);
+#endif
 #ifdef ANDROID
 	if (VR_GetPlatformFlag(VR_PLATFORM_EXTENSION_INSTANCE)) {
 		extensions.push_back(XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME);
@@ -91,7 +95,12 @@ void VR_Init( void* system, const char* name, int version ) {
 	OXR(initResult = xrCreateInstance(&instanceCreateInfo, &vr_engine.appState.Instance));
 	if (initResult != XR_SUCCESS) {
 		ALOGE("Failed to create XR instance: %d.", initResult);
+#if XR_USE_PLATFORM_WIN32
+		// Graceful fallback: no VR runtime available, continue as non-VR
+		return;
+#else
 		exit(1);
+#endif
 	}
 
 	XRLoadInstanceFunctions(vr_engine.appState.Instance);
@@ -117,11 +126,28 @@ void VR_Init( void* system, const char* name, int version ) {
 	OXR(initResult = xrGetSystem(vr_engine.appState.Instance, &systemGetInfo, &systemId));
 	if (initResult != XR_SUCCESS) {
 		ALOGE("Failed to get system.");
+#if XR_USE_PLATFORM_WIN32
+		// Graceful fallback: no headset connected, continue as non-VR
+		xrDestroyInstance(vr_engine.appState.Instance);
+		vr_engine.appState.Instance = XR_NULL_HANDLE;
+		return;
+#else
 		exit(1);
+#endif
 	}
 
 	// Get the graphics requirements.
-#ifdef XR_USE_GRAPHICS_API_OPENGL_ES
+#if XR_USE_GRAPHICS_API_OPENGL && !defined(ANDROID)
+	PFN_xrGetOpenGLGraphicsRequirementsKHR pfnGetOpenGLGraphicsRequirementsKHR = NULL;
+	OXR(xrGetInstanceProcAddr(
+			vr_engine.appState.Instance,
+			"xrGetOpenGLGraphicsRequirementsKHR",
+			(PFN_xrVoidFunction*)(&pfnGetOpenGLGraphicsRequirementsKHR)));
+
+	XrGraphicsRequirementsOpenGLKHR graphicsRequirements = {};
+	graphicsRequirements.type = XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_KHR;
+	OXR(pfnGetOpenGLGraphicsRequirementsKHR(vr_engine.appState.Instance, systemId, &graphicsRequirements));
+#elif defined(XR_USE_GRAPHICS_API_OPENGL_ES)
 	PFN_xrGetOpenGLESGraphicsRequirementsKHR pfnGetOpenGLESGraphicsRequirementsKHR = NULL;
 	OXR(xrGetInstanceProcAddr(
 			vr_engine.appState.Instance,
@@ -147,7 +173,11 @@ void VR_Destroy( engine_t* engine ) {
 	}
 }
 
+#if XR_USE_PLATFORM_WIN32
+void VR_EnterVR( engine_t* engine, HDC hDC, HGLRC hGLRC ) {
+#else
 void VR_EnterVR( engine_t* engine ) {
+#endif
 
 	if (engine->appState.Session) {
 		ALOGE("VR_EnterVR called with existing session");
@@ -156,21 +186,23 @@ void VR_EnterVR( engine_t* engine ) {
 
 	// Create the OpenXR Session.
 	XrSessionCreateInfo sessionCreateInfo = {};
-#ifdef ANDROID
-	XrGraphicsBindingOpenGLESAndroidKHR graphicsBindingGL = {};
-#elif XR_USE_GRAPHICS_API_OPENGL
-	XrGraphicsBindingOpenGLWin32KHR graphicsBindingGL = {};
-#endif
 	memset(&sessionCreateInfo, 0, sizeof(sessionCreateInfo));
-#ifdef ANDROID
+
+#if XR_USE_PLATFORM_WIN32
+	XrGraphicsBindingOpenGLWin32KHR graphicsBindingGL = {};
+	graphicsBindingGL.type = XR_TYPE_GRAPHICS_BINDING_OPENGL_WIN32_KHR;
+	graphicsBindingGL.next = NULL;
+	graphicsBindingGL.hDC = hDC;
+	graphicsBindingGL.hGLRC = hGLRC;
+	sessionCreateInfo.next = &graphicsBindingGL;
+#elif defined(ANDROID)
+	XrGraphicsBindingOpenGLESAndroidKHR graphicsBindingGL = {};
 	graphicsBindingGL.type = XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR;
 	graphicsBindingGL.next = NULL;
 	graphicsBindingGL.display = eglGetCurrentDisplay();
 	graphicsBindingGL.config = NULL;
 	graphicsBindingGL.context = eglGetCurrentContext();
 	sessionCreateInfo.next = &graphicsBindingGL;
-#else
-	//TODO:PCVR definition
 #endif
 	sessionCreateInfo.type = XR_TYPE_SESSION_CREATE_INFO;
 	sessionCreateInfo.createFlags = 0;
@@ -180,7 +212,12 @@ void VR_EnterVR( engine_t* engine ) {
 	OXR(initResult = xrCreateSession(engine->appState.Instance, &sessionCreateInfo, &engine->appState.Session));
 	if (initResult != XR_SUCCESS) {
 		ALOGE("Failed to create XR session: %d.", initResult);
+#if XR_USE_PLATFORM_WIN32
+		// Graceful fallback: session creation failed, continue as non-VR
+		return;
+#else
 		exit(1);
+#endif
 	}
 
 	// Create a space to the first path

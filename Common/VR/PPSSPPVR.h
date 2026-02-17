@@ -2,6 +2,10 @@
 
 #include <cstddef>
 
+#ifdef _WIN32
+#include "Common/CommonWindows.h"
+#endif
+
 struct AxisInput;
 struct TouchInput;
 struct KeyInput;
@@ -30,6 +34,9 @@ enum VRAppMode {
 // VR app flow integration
 bool IsVREnabled();
 void InitVROnAndroid(void* vm, void* activity, const char* system, int version, const char* name);
+#ifdef _WIN32
+void InitVROnWindows(HDC hDC, HGLRC hGLRC);
+#endif
 void EnterVR(bool firstStart);
 void GetVRResolutionPerEye(int* width, int* height);
 void SetVRCallbacks(void(*axis)(const AxisInput *axis, size_t count), bool(*key)(const KeyInput &key), void(*touch)(const TouchInput &touch));

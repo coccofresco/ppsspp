@@ -127,7 +127,11 @@ enum VRPlatformFlag {
 
 void VR_Init( void* system, const char* name, int version );
 void VR_Destroy( engine_t* engine );
+#if XR_USE_PLATFORM_WIN32
+void VR_EnterVR( engine_t* engine, HDC hDC, HGLRC hGLRC );
+#else
 void VR_EnterVR( engine_t* engine );
+#endif
 void VR_LeaveVR( engine_t* engine );
 
 engine_t* VR_GetEngine( void );
