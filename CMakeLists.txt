@@ -133,8 +133,15 @@ add_compile_definitions(ASSETS_DIR="${CMAKE_INSTALL_FULL_DATADIR}/ppsspp/assets/
 
 if(OPENXR AND NOT ARMV7_DEVICE)
 	add_compile_definitions(OPENXR)
-	add_subdirectory(ext/OpenXR-SDK)
-	message("OpenXR enabled")
+	if(WIN32)
+		# On Windows, OpenXR functions are loaded dynamically via LoadLibrary
+		# in Common/VR/OpenXRLoader.cpp -- no need to build the SDK loader.
+		# We only need the headers from ext/OpenXR-SDK/include/.
+		message("OpenXR enabled (Windows, dynamic loader, OpenGL)")
+	else()
+		add_subdirectory(ext/OpenXR-SDK)
+		message("OpenXR enabled")
+	endif()
 endif()
 
 if(GOLD)
@@ -213,6 +220,7 @@ option(USE_CCACHE "Use ccache if detected" ON)
 option(USE_NO_MMAP "Disable mmap usage" OFF)
 option(USE_IAP "IAP enabled" OFF)
 option(GOLD "Gold build" OFF)
+option(OPENXR "Enable OpenXR VR support" OFF)
 
 if(USE_CCACHE)
 	include(ccache)
@@ -295,7 +303,8 @@ include_directories(ext/glslang)
 # Anyway, glew will be going away anyway.
 include_directories(ext/glew)
 
-if(OPENXR AND NOT ARMV7_DEVICE)
+if(OPENXR AND NOT ARMV7_DEVICE AND NOT WIN32)
+	# Android/Quest OpenXR uses GLES3
 	set(OPENGL_LIBRARIES GLESv3 EGL)
 elseif(NOT OPENGL_LIBRARIES AND USING_GLES2)
 	set(OPENGL_LIBRARIES GLESv2 EGL)
@@ -949,6 +958,13 @@ if(IOS)
 	target_compile_definitions(Common PUBLIC GLES_SILENCE_DEPRECATION)
 endif()
 
+if(WIN32 AND OPENXR)
+	target_compile_definitions(Common PUBLIC
+		XR_USE_PLATFORM_WIN32=1
+		XR_USE_GRAPHICS_API_OPENGL=1
+	)
+endif()
+
 target_link_libraries(Common Ext::Snappy cpu_features)
 
 if(NOT LIBRETRO)
@@ -1332,7 +1348,9 @@ set(BASISU_LIBRARIES basis_universal)
 set(nativeExtra)
 set(nativeExtraLibs)
 
-if(OPENXR AND NOT ARMV7_DEVICE)
+if(OPENXR AND NOT ARMV7_DEVICE AND NOT WIN32)
+	# Android/Quest: link against the built OpenXR loader.
+	# Windows: OpenXR functions are loaded dynamically via LoadLibrary.
 	list(APPEND nativeExtraLibs openxr_loader)
 endif()
 
