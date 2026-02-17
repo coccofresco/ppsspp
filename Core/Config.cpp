@@ -504,9 +504,10 @@ const char * const vulkanDefaultBlacklist[] = {
 };
 
 static int DefaultGPUBackend() {
-	if (IsVREnabled()) {
-		return (int)GPUBackend::OPENGL;
-	}
+#if OPENXR
+	// VR requires OpenGL for OpenXR GL binding.
+	return (int)GPUBackend::OPENGL;
+#endif
 
 #if PPSSPP_PLATFORM(UWP)
 	return (int)GPUBackend::DIRECT3D11;

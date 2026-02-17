@@ -87,12 +87,12 @@ bool XRLoad() {
 	return false;
 #endif
 
-	// Load the three basic functions.
+	// Load the global-level functions (callable without an XrInstance).
 	xrGetInstanceProcAddr = (PFN_xrGetInstanceProcAddr)dlsym(g_xrLibrary, "xrGetInstanceProcAddr");
 	xrEnumerateApiLayerProperties = (PFN_xrEnumerateApiLayerProperties)dlsym(g_xrLibrary, "xrEnumerateApiLayerProperties");
 	xrEnumerateInstanceExtensionProperties = (PFN_xrEnumerateInstanceExtensionProperties)dlsym(g_xrLibrary, "xrEnumerateInstanceExtensionProperties");
+	xrCreateInstance = (PFN_xrCreateInstance)dlsym(g_xrLibrary, "xrCreateInstance");
 
-	// Load the rest.
 	return true;
 }
 

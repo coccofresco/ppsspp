@@ -9,6 +9,8 @@
 #include <cstdlib>
 #include <cstring>
 
+extern void VRLog(const char* msg);
+
 XrFovf fov;
 XrView* projections;
 XrPosef invViewTransform[2];
@@ -237,6 +239,12 @@ void VR_InitRenderer( engine_t* engine ) {
 		projections[eye].type = XR_TYPE_VIEW;
 	}
 
+	{
+		char buf[256];
+		snprintf(buf, sizeof(buf), "[VR_InitRenderer] eyeW=%d eyeH=%d supersampling=%.2f",
+			eyeW, eyeH, VR_GetConfigFloat(VR_CONFIG_VIEWPORT_SUPERSAMPLING));
+		VRLog(buf);
+	}
 	ovrRenderer_Create(engine->appState.Session, &engine->appState.Renderer, eyeW, eyeH);
 
 	if (VR_GetPlatformFlag(VRPlatformFlag::VR_PLATFORM_EXTENSION_PASSTHROUGH)) {
@@ -570,6 +578,16 @@ void VR_FinishFrame( engine_t* engine ) {
 		endFrameInfo.layerCount = 0;
 		endFrameInfo.layers = nullptr;
 	}
+	static int frameCounter = 0;
+	if (frameCounter < 5) {
+		char buf[512];
+		snprintf(buf, sizeof(buf), "[VR_FinishFrame] frame=%d shouldRender=%d layerCount=%d vrMode=%d swW=%d swH=%d",
+			frameCounter, (int)frameState.shouldRender, endFrameInfo.layerCount, vrConfig[VR_CONFIG_MODE],
+			engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Width,
+			engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Height);
+		VRLog(buf);
+	}
+	frameCounter++;
 	OXR(xrEndFrame(engine->appState.Session, &endFrameInfo));
 }
 

@@ -141,24 +141,36 @@ bool IsVREnabled() {
 }
 
 #if XR_USE_PLATFORM_WIN32
+void VRLog(const char* msg) {
+	FILE* f = fopen("vr_debug.log", "a");
+	if (f) { fprintf(f, "%s\n", msg); fclose(f); }
+}
+
 void InitVROnWindows(HDC hDC, HGLRC hGLRC) {
+	VRLog("[VR] InitVROnWindows: start");
+
 	// Set platform flags for PC VR
 	VR_SetPlatformFLag(VR_PLATFORM_CONTROLLER_QUEST, true);
 	VR_SetConfigFloat(VR_CONFIG_VIEWPORT_SUPERSAMPLING, 1.0f);
 
-	// Init VR -- pass nullptr for system (no Java VM on Windows)
+	VRLog("[VR] Calling VR_Init...");
 	VR_Init(nullptr, "PPSSPP", 0);
+	VRLog("[VR] VR_Init returned");
 
 	// Check if VR init succeeded (no headset or no runtime = graceful fallback)
 	engine_t* engine = VR_GetEngine();
 	if (!engine->appState.Instance) {
-		ALOGE("VR init failed: no OpenXR runtime or headset. Continuing as non-VR.");
+		VRLog("[VR] VR init failed: no Instance. Continuing as non-VR.");
 		return;
 	}
+	VRLog("[VR] Instance OK, calling VR_EnterVR...");
 
-	// Enter VR with the Win32 GL context binding
 	VR_EnterVR(engine, hDC, hGLRC);
+	VRLog("[VR] VR_EnterVR returned, calling IN_VRInit...");
+
 	IN_VRInit(engine);
+	VRLog("[VR] IN_VRInit returned, VR init complete");
+
 	VR_SetConfig(VR_CONFIG_VIEWPORT_VALID, false);
 }
 #endif

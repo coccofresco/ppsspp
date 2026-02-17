@@ -14,15 +14,21 @@ static bool vr_platform[VR_PLATFORM_MAX];
 static engine_t vr_engine;
 int vr_initialized = 0;
 
+extern void VRLog(const char* msg);  // defined in PPSSPPVR.cpp
+
 void VR_Init( void* system, const char* name, int version ) {
 	if (vr_initialized)
 		return;
 
+	VRLog("[VR_Init] calling XRLoad...");
 	if (!XRLoad()) {
+		VRLog("[VR_Init] XRLoad failed");
 		return;
 	}
+	VRLog("[VR_Init] XRLoad OK");
 
 	ovrApp_Clear(&vr_engine.appState);
+	VRLog("[VR_Init] ovrApp_Clear OK");
 
 #ifdef ANDROID
 	PFN_xrInitializeLoaderKHR xrInitializeLoaderKHR;
@@ -97,9 +103,11 @@ void VR_Init( void* system, const char* name, int version ) {
 	}
 #endif
 
+	VRLog("[VR_Init] calling xrCreateInstance...");
 	XrResult initResult;
 	OXR(initResult = xrCreateInstance(&instanceCreateInfo, &vr_engine.appState.Instance));
 	if (initResult != XR_SUCCESS) {
+		VRLog("[VR_Init] xrCreateInstance FAILED");
 		ALOGE("Failed to create XR instance: %d.", initResult);
 #if XR_USE_PLATFORM_WIN32
 		// Graceful fallback: no VR runtime available, continue as non-VR
@@ -108,13 +116,16 @@ void VR_Init( void* system, const char* name, int version ) {
 		exit(1);
 #endif
 	}
+	VRLog("[VR_Init] xrCreateInstance OK");
 
 	XRLoadInstanceFunctions(vr_engine.appState.Instance);
+	VRLog("[VR_Init] XRLoadInstanceFunctions OK");
 
 	XrInstanceProperties instanceInfo;
 	instanceInfo.type = XR_TYPE_INSTANCE_PROPERTIES;
 	instanceInfo.next = NULL;
 	OXR(xrGetInstanceProperties(vr_engine.appState.Instance, &instanceInfo));
+	VRLog("[VR_Init] xrGetInstanceProperties OK");
 	ALOGV(
 			"Runtime %s: Version : %u.%u.%u",
 			instanceInfo.runtimeName,
@@ -128,9 +139,11 @@ void VR_Init( void* system, const char* name, int version ) {
 	systemGetInfo.next = NULL;
 	systemGetInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
 
+	VRLog("[VR_Init] calling xrGetSystem...");
 	XrSystemId systemId;
 	OXR(initResult = xrGetSystem(vr_engine.appState.Instance, &systemGetInfo, &systemId));
 	if (initResult != XR_SUCCESS) {
+		VRLog("[VR_Init] xrGetSystem FAILED");
 		ALOGE("Failed to get system.");
 #if XR_USE_PLATFORM_WIN32
 		// Graceful fallback: no headset connected, continue as non-VR
@@ -141,9 +154,11 @@ void VR_Init( void* system, const char* name, int version ) {
 		exit(1);
 #endif
 	}
+	VRLog("[VR_Init] xrGetSystem OK");
 
 	// Get the graphics requirements.
 #if XR_USE_GRAPHICS_API_OPENGL && !defined(ANDROID)
+	VRLog("[VR_Init] calling xrGetOpenGLGraphicsRequirementsKHR...");
 	PFN_xrGetOpenGLGraphicsRequirementsKHR pfnGetOpenGLGraphicsRequirementsKHR = NULL;
 	OXR(xrGetInstanceProcAddr(
 			vr_engine.appState.Instance,
@@ -153,6 +168,7 @@ void VR_Init( void* system, const char* name, int version ) {
 	XrGraphicsRequirementsOpenGLKHR graphicsRequirements = {};
 	graphicsRequirements.type = XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_KHR;
 	OXR(pfnGetOpenGLGraphicsRequirementsKHR(vr_engine.appState.Instance, systemId, &graphicsRequirements));
+	VRLog("[VR_Init] graphics requirements OK");
 #elif defined(XR_USE_GRAPHICS_API_OPENGL_ES)
 	PFN_xrGetOpenGLESGraphicsRequirementsKHR pfnGetOpenGLESGraphicsRequirementsKHR = NULL;
 	OXR(xrGetInstanceProcAddr(

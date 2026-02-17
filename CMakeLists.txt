@@ -134,10 +134,15 @@ add_compile_definitions(ASSETS_DIR="${CMAKE_INSTALL_FULL_DATADIR}/ppsspp/assets/
 if(OPENXR AND NOT ARMV7_DEVICE)
 	add_compile_definitions(OPENXR)
 	if(WIN32)
-		# On Windows, OpenXR functions are loaded dynamically via LoadLibrary
-		# in Common/VR/OpenXRLoader.cpp -- no need to build the SDK loader.
-		# We only need the headers from ext/OpenXR-SDK/include/.
-		message("OpenXR enabled (Windows, dynamic loader, OpenGL)")
+		# Build the OpenXR loader DLL from the SDK so it's available at runtime.
+		# PPSSPP's OpenXRLoader.cpp uses LoadLibrary("openxr_loader.dll") to load
+		# it dynamically -- the DLL must be next to the executable.
+		set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+		set(BUILD_API_LAYERS OFF CACHE BOOL "" FORCE)
+		set(BUILD_CONFORMANCE_TESTS OFF CACHE BOOL "" FORCE)
+		set(DYNAMIC_LOADER ON CACHE BOOL "" FORCE)
+		add_subdirectory(ext/OpenXR-SDK)
+		message("OpenXR enabled (Windows, dynamic loader DLL built from SDK)")
 	else()
 		add_subdirectory(ext/OpenXR-SDK)
 		message("OpenXR enabled")
@@ -3050,6 +3055,15 @@ if(TargetBin)
 		target_link_options(${TargetBin} PRIVATE "-Wl,-z,max-page-size=16384")
 	endif()
 	target_link_libraries(${TargetBin} ${LinkCommon} Common)
+endif()
+
+# Copy openxr_loader.dll next to the executable after build
+if(WIN32 AND OPENXR AND TARGET openxr_loader)
+	add_custom_command(TARGET ${TargetBin} POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			$<TARGET_FILE:openxr_loader>
+			$<TARGET_FILE_DIR:${TargetBin}>
+	)
 endif()
 
 # installs

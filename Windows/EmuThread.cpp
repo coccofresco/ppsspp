@@ -34,6 +34,7 @@
 #if OPENXR
 #include "Common/VR/PPSSPPVR.h"
 #include "Common/VR/VRBase.h"
+extern void VRLog(const char* msg);
 #include "Common/System/Display.h"
 #endif
 
@@ -281,6 +282,7 @@ void MainThreadFunc() {
 		WindowsGLContext *glCtx = dynamic_cast<WindowsGLContext *>(g_graphicsContext);
 		if (glCtx) {
 			InitVROnWindows(glCtx->GetHDC(), glCtx->GetHGLRC());
+			SetVRCallbacks(NativeAxis, NativeKey, NativeTouch);
 		}
 	}
 #endif
