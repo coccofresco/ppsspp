@@ -50,6 +50,7 @@ enum { ovrMaxNumEyes = 2 };
 
 typedef union {
 	XrCompositionLayerProjection Projection;
+	XrCompositionLayerQuad Quad;
 	XrCompositionLayerCylinderKHR Cylinder;
 	XrCompositionLayerPassthroughFB Passthrough;
 } ovrCompositorLayer_Union;

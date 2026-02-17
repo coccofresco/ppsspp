@@ -31,6 +31,12 @@
 #include "Windows/GPU/WindowsVulkanContext.h"
 #include "Windows/GPU/D3D11Context.h"
 
+#if OPENXR
+#include "Common/VR/PPSSPPVR.h"
+#include "Common/VR/VRBase.h"
+#include "Common/System/Display.h"
+#endif
+
 enum class EmuThreadState {
 	DISABLED,
 	START_REQUESTED,
@@ -269,12 +275,37 @@ void MainThreadFunc() {
 	}
 	graphicsContext->ThreadStart();
 
+#if OPENXR
+	// Initialize VR after GL context is ready on the render thread
+	if (g_Config.bEnableVR) {
+		WindowsGLContext *glCtx = dynamic_cast<WindowsGLContext *>(g_graphicsContext);
+		if (glCtx) {
+			InitVROnWindows(glCtx->GetHDC(), glCtx->GetHGLRC());
+		}
+	}
+#endif
+
 	if (useEmuThread) {
 		while (true) {
 			if (equals_any(g_emuThreadState, EmuThreadState::QUIT_REQUESTED, EmuThreadState::STOPPED)) {
 				break;
 			}
+
+#if OPENXR
+			if (IsVREnabled()) {
+				if (!StartVRRender()) continue;  // xrWaitFrame + xrBeginFrame
+			}
+#endif
+
 			graphicsContext->ThreadFrame(true);
+
+#if OPENXR
+			if (IsVREnabled()) {
+				UpdateVRInput(g_Config.bHapticFeedback, g_display.dpi_scale_x, g_display.dpi_scale_y);
+				FinishVRRender();  // xrEndFrame
+			}
+#endif
+
 			if (GetUIState() == UISTATE_EXIT) {
 				break;
 			}
@@ -310,6 +341,13 @@ void MainThreadFunc() {
 	if (!useEmuThread) {
 		NativeShutdownGraphics();
 	}
+
+#if OPENXR
+	if (IsVREnabled()) {
+		VR_LeaveVR(VR_GetEngine());
+		VR_Destroy(VR_GetEngine());
+	}
+#endif
 
 	g_graphicsContext->ThreadEnd();
 	g_graphicsContext->ShutdownFromRenderThread();

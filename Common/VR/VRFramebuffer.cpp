@@ -391,15 +391,34 @@ int ovrApp_HandleXrEvents(ovrApp* app) {
 						FromXrTime(session_state_changed_event->time));
 
 				switch (session_state_changed_event->state) {
-					case XR_SESSION_STATE_FOCUSED:
-						app->Focused = true;
-						break;
-					case XR_SESSION_STATE_VISIBLE:
+					case XR_SESSION_STATE_IDLE:
+						// Do nothing, wait for READY
 						app->Focused = false;
+						app->SessionActive = false;
 						break;
 					case XR_SESSION_STATE_READY:
 					case XR_SESSION_STATE_STOPPING:
 						ovrApp_HandleSessionStateChanges(app, session_state_changed_event->state);
+						break;
+					case XR_SESSION_STATE_SYNCHRONIZED:
+						// Session is synchronized but not yet visible -- submit empty frames
+						app->Focused = false;
+						break;
+					case XR_SESSION_STATE_VISIBLE:
+						// Session is visible but not focused -- render VR but no input
+						app->Focused = false;
+						break;
+					case XR_SESSION_STATE_FOCUSED:
+						// Full operation -- render and input
+						app->Focused = true;
+						break;
+					case XR_SESSION_STATE_EXITING:
+						// Runtime wants us to exit -- clean shutdown
+						app->SessionActive = false;
+						break;
+					case XR_SESSION_STATE_LOSS_PENDING:
+						// Instance is about to be lost -- clean shutdown
+						app->SessionActive = false;
 						break;
 					default:
 						break;

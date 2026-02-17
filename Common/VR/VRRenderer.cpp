@@ -449,7 +449,8 @@ void VR_FinishFrame( engine_t* engine ) {
 		XrQuaternionf pitch = XrQuaternionf_CreateFromVectorAngle({1, 0, 0}, -menuPitch);
 		XrQuaternionf yaw = XrQuaternionf_CreateFromVectorAngle({0, 1, 0}, menuYaw);
 
-		// Setup the cylinder layer
+#ifdef ANDROID
+		// On Android (Quest/Pico), use cylinder layer for curved cinema screen
 		XrCompositionLayerCylinderKHR cylinder_layer = {};
 		cylinder_layer.type = XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR;
 		cylinder_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
@@ -491,6 +492,57 @@ void VR_FinishFrame( engine_t* engine ) {
 			cylinder_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[1].ColorSwapChain.Handle;
 			engine->appState.Layers[engine->appState.LayerCount++].Cylinder = cylinder_layer;
 		}
+#else
+		// On Windows, use quad layer for cross-runtime compatibility
+		// (SteamVR does not support XR_KHR_composition_layer_cylinder)
+		float aspect = VR_GetConfigFloat(VR_CONFIG_CANVAS_ASPECT);
+		if (headTracking && !reprojection) {
+			float width = (float)engine->appState.ViewConfigurationView[0].recommendedImageRectWidth;
+			float height = (float)engine->appState.ViewConfigurationView[0].recommendedImageRectHeight;
+			aspect = 2.0f * width / height;
+		}
+
+		// PSP aspect ratio is 480:272 (1.7647:1)
+		// Screen size in meters: height derived from distance for comfortable viewing
+		float screenHeight = distance * 0.75f;
+		if (screenHeight < 0.5f) screenHeight = 0.5f;
+		float screenWidth = screenHeight * aspect;
+
+		XrCompositionLayerQuad quad_layer = {};
+		quad_layer.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
+		quad_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+		quad_layer.space = engine->appState.CurrentSpace;
+		memset(&quad_layer.subImage, 0, sizeof(XrSwapchainSubImage));
+		quad_layer.subImage.imageRect.offset.x = 0;
+		quad_layer.subImage.imageRect.offset.y = 0;
+		quad_layer.subImage.imageRect.extent.width = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Width;
+		quad_layer.subImage.imageRect.extent.height = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Height;
+		quad_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Handle;
+		quad_layer.subImage.imageArrayIndex = 0;
+		quad_layer.pose.orientation = XrQuaternionf_Multiply(pitch, yaw);
+		quad_layer.pose.position = pos;
+		quad_layer.size.width = screenWidth;
+		quad_layer.size.height = screenHeight;
+
+		// Build the quad layer
+		if ((vrMode == VR_MODE_MONO_SCREEN) || (vrMode == VR_MODE_MONO_6DOF)) {
+			quad_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+			engine->appState.Layers[engine->appState.LayerCount++].Quad = quad_layer;
+		} else if ((vrMode == VR_MODE_SBS_SCREEN) || (vrMode == VR_MODE_SBS_6DOF)) {
+			quad_layer.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
+			quad_layer.subImage.imageRect.extent.width /= 2;
+			engine->appState.Layers[engine->appState.LayerCount++].Quad = quad_layer;
+			quad_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
+			quad_layer.subImage.imageRect.offset.x += quad_layer.subImage.imageRect.extent.width;
+			engine->appState.Layers[engine->appState.LayerCount++].Quad = quad_layer;
+		} else {
+			quad_layer.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
+			engine->appState.Layers[engine->appState.LayerCount++].Quad = quad_layer;
+			quad_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
+			quad_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[1].ColorSwapChain.Handle;
+			engine->appState.Layers[engine->appState.LayerCount++].Quad = quad_layer;
+		}
+#endif
 	}
 
 	// Compose the layers for this frame.
@@ -503,8 +555,14 @@ void VR_FinishFrame( engine_t* engine ) {
 	endFrameInfo.type = XR_TYPE_FRAME_END_INFO;
 	endFrameInfo.displayTime = frameState.predictedDisplayTime;
 	endFrameInfo.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
-	endFrameInfo.layerCount = engine->appState.LayerCount;
-	endFrameInfo.layers = layers;
+	// When shouldRender is false (e.g. SYNCHRONIZED state), submit zero layers
+	if (frameState.shouldRender) {
+		endFrameInfo.layerCount = engine->appState.LayerCount;
+		endFrameInfo.layers = layers;
+	} else {
+		endFrameInfo.layerCount = 0;
+		endFrameInfo.layers = nullptr;
+	}
 	OXR(xrEndFrame(engine->appState.Session, &endFrameInfo));
 }
 
