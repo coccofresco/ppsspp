@@ -76,8 +76,14 @@ void VR_Init( void* system, const char* name, int version ) {
 	instanceCreateInfo.next = NULL;
 	instanceCreateInfo.createFlags = 0;
 	instanceCreateInfo.applicationInfo = appInfo;
+#ifdef OPENXR_VALIDATION
+	const char* enabledApiLayers[] = { "XR_APILAYER_LUNARG_core_validation" };
+	instanceCreateInfo.enabledApiLayerCount = 1;
+	instanceCreateInfo.enabledApiLayerNames = enabledApiLayers;
+#else
 	instanceCreateInfo.enabledApiLayerCount = 0;
 	instanceCreateInfo.enabledApiLayerNames = NULL;
+#endif
 	instanceCreateInfo.enabledExtensionCount = (uint32_t)extensions.size();
 	instanceCreateInfo.enabledExtensionNames = extensions.data();
 

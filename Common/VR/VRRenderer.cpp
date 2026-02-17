@@ -502,11 +502,18 @@ void VR_FinishFrame( engine_t* engine ) {
 			aspect = 2.0f * width / height;
 		}
 
-		// PSP aspect ratio is 480:272 (1.7647:1)
-		// Screen size in meters: height derived from distance for comfortable viewing
-		float screenHeight = distance * 0.75f;
-		if (screenHeight < 0.5f) screenHeight = 0.5f;
-		float screenWidth = screenHeight * aspect;
+		// Screen size driven by fCanvasDistance and fFieldOfViewPercentage.
+		// fFieldOfViewPercentage (100-200) scales the screen's angular size:
+		// at 100% the screen subtends ~44 deg; at 200% it doubles.
+		// This single control satisfies both CINE-03 (screen size) and CINE-04 (FOV scale).
+		float fovScale = VR_GetConfigFloat(VR_CONFIG_FOV_SCALE);
+		if (fovScale < 1.0f) fovScale = 1.0f;
+		float absDistance = fabs(distance);
+		if (absDistance < 0.5f) absDistance = 0.5f;
+		float baseWidth = absDistance * 0.8f;  // subtends ~44 deg at scale 1.0
+		float screenWidth = baseWidth * fovScale;
+		float screenHeight = screenWidth / aspect;
+		if (screenHeight < 0.1f) screenHeight = 0.1f;
 
 		XrCompositionLayerQuad quad_layer = {};
 		quad_layer.type = XR_TYPE_COMPOSITION_LAYER_QUAD;

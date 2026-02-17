@@ -21,6 +21,8 @@ enum VRConfigFloat {
 	// 2D canvas positioning
 	VR_CONFIG_CANVAS_DISTANCE, VR_CONFIG_MENU_PITCH, VR_CONFIG_MENU_YAW, VR_CONFIG_RECENTER_YAW,
 	VR_CONFIG_CANVAS_ASPECT,
+	// FOV / screen size scale (1.0 - 2.0, derived from fFieldOfViewPercentage / 100)
+	VR_CONFIG_FOV_SCALE,
 
 	//viewport setup
 	VR_CONFIG_VIEWPORT_SUPERSAMPLING,
@@ -38,6 +40,7 @@ enum VRMode {
 };
 
 void VR_GetResolution( engine_t* engine, int *pWidth, int *pHeight );
+void VR_Recenter( engine_t* engine );
 void VR_InitRenderer( engine_t* engine );
 void VR_DestroyRenderer( engine_t* engine );
 

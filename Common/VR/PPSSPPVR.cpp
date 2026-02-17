@@ -598,6 +598,7 @@ bool StartVRRender() {
 
 		// Set customizations
 		VR_SetConfigFloat(VR_CONFIG_CANVAS_DISTANCE, !IsBigScreenVRMode() && (appMode == VR_GAME_MODE) ? g_Config.fCanvas3DDistance : g_Config.fCanvasDistance);
+		VR_SetConfigFloat(VR_CONFIG_FOV_SCALE, g_Config.fFieldOfViewPercentage / 100.0f);
 		VR_SetConfig(VR_CONFIG_PASSTHROUGH, g_Config.bPassthrough && IsPassthroughSupported());
 		return true;
 	}
@@ -606,6 +607,13 @@ bool StartVRRender() {
 
 void FinishVRRender() {
 	VR_FinishFrame(VR_GetEngine());
+}
+
+void RecenterScreen() {
+	engine_t* engine = VR_GetEngine();
+	if (engine && engine->appState.Session) {
+		VR_Recenter(engine);
+	}
 }
 
 void PreVRFrameRender(int fboIndex) {

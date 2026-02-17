@@ -310,6 +310,62 @@ void IN_VRInit( engine_t *engine ) {
 	suggestedBindings.countSuggestedBindings = currBinding;
 	OXR(xrSuggestInteractionProfileBindings(engine->appState.Instance, &suggestedBindings));
 
+	// Valve Index controller profile (PC VR)
+	{
+		XrPath indexProfilePath = XR_NULL_PATH;
+		OXR(xrStringToPath(engine->appState.Instance, "/interaction_profiles/valve/index_controller", &indexProfilePath));
+
+		XrActionSuggestedBinding indexBindings[20];
+		int idx = 0;
+		indexBindings[idx++] = ActionSuggestedBinding(indexLeftAction,  "/user/hand/left/input/trigger/click");
+		indexBindings[idx++] = ActionSuggestedBinding(indexRightAction, "/user/hand/right/input/trigger/click");
+		indexBindings[idx++] = ActionSuggestedBinding(menuAction,       "/user/hand/left/input/system/click");
+		indexBindings[idx++] = ActionSuggestedBinding(buttonAAction,    "/user/hand/right/input/a/click");
+		indexBindings[idx++] = ActionSuggestedBinding(buttonBAction,    "/user/hand/right/input/b/click");
+		indexBindings[idx++] = ActionSuggestedBinding(buttonXAction,    "/user/hand/left/input/a/click");
+		indexBindings[idx++] = ActionSuggestedBinding(buttonYAction,    "/user/hand/left/input/b/click");
+		indexBindings[idx++] = ActionSuggestedBinding(gripLeftAction,   "/user/hand/left/input/squeeze/value");
+		indexBindings[idx++] = ActionSuggestedBinding(gripRightAction,  "/user/hand/right/input/squeeze/value");
+		indexBindings[idx++] = ActionSuggestedBinding(moveOnLeftJoystickAction,  "/user/hand/left/input/thumbstick");
+		indexBindings[idx++] = ActionSuggestedBinding(moveOnRightJoystickAction, "/user/hand/right/input/thumbstick");
+		indexBindings[idx++] = ActionSuggestedBinding(thumbstickLeftClickAction,  "/user/hand/left/input/thumbstick/click");
+		indexBindings[idx++] = ActionSuggestedBinding(thumbstickRightClickAction, "/user/hand/right/input/thumbstick/click");
+		indexBindings[idx++] = ActionSuggestedBinding(vibrateLeftFeedback,  "/user/hand/left/output/haptic");
+		indexBindings[idx++] = ActionSuggestedBinding(vibrateRightFeedback, "/user/hand/right/output/haptic");
+		indexBindings[idx++] = ActionSuggestedBinding(handPoseLeftAction,  "/user/hand/left/input/aim/pose");
+		indexBindings[idx++] = ActionSuggestedBinding(handPoseRightAction, "/user/hand/right/input/aim/pose");
+
+		XrInteractionProfileSuggestedBinding indexSuggested = {};
+		indexSuggested.type = XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING;
+		indexSuggested.interactionProfile = indexProfilePath;
+		indexSuggested.suggestedBindings = indexBindings;
+		indexSuggested.countSuggestedBindings = idx;
+		OXR(xrSuggestInteractionProfileBindings(engine->appState.Instance, &indexSuggested));
+	}
+
+	// KHR Simple controller profile (universal fallback for any OpenXR runtime)
+	{
+		XrPath simpleProfilePath = XR_NULL_PATH;
+		OXR(xrStringToPath(engine->appState.Instance, "/interaction_profiles/khr/simple_controller", &simpleProfilePath));
+
+		XrActionSuggestedBinding simpleBindings[8];
+		int idx = 0;
+		simpleBindings[idx++] = ActionSuggestedBinding(indexLeftAction,  "/user/hand/left/input/select/click");
+		simpleBindings[idx++] = ActionSuggestedBinding(indexRightAction, "/user/hand/right/input/select/click");
+		simpleBindings[idx++] = ActionSuggestedBinding(menuAction,       "/user/hand/left/input/menu/click");
+		simpleBindings[idx++] = ActionSuggestedBinding(vibrateLeftFeedback,  "/user/hand/left/output/haptic");
+		simpleBindings[idx++] = ActionSuggestedBinding(vibrateRightFeedback, "/user/hand/right/output/haptic");
+		simpleBindings[idx++] = ActionSuggestedBinding(handPoseLeftAction,  "/user/hand/left/input/aim/pose");
+		simpleBindings[idx++] = ActionSuggestedBinding(handPoseRightAction, "/user/hand/right/input/aim/pose");
+
+		XrInteractionProfileSuggestedBinding simpleSuggested = {};
+		simpleSuggested.type = XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING;
+		simpleSuggested.interactionProfile = simpleProfilePath;
+		simpleSuggested.suggestedBindings = simpleBindings;
+		simpleSuggested.countSuggestedBindings = idx;
+		OXR(xrSuggestInteractionProfileBindings(engine->appState.Instance, &simpleSuggested));
+	}
+
 	// Attach actions
 	XrSessionActionSetsAttachInfo attachInfo = {};
 	attachInfo.type = XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO;

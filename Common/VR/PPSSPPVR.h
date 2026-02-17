@@ -55,6 +55,7 @@ void SetVRCompat(VRCompatFlag flag, long value);
 void* BindVRFramebuffer();
 bool StartVRRender();
 void FinishVRRender();
+void RecenterScreen();
 void PreVRFrameRender(int fboIndex);
 void PostVRFrameRender();
 int GetVRFBOIndex();

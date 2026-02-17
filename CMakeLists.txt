@@ -221,6 +221,7 @@ option(USE_NO_MMAP "Disable mmap usage" OFF)
 option(USE_IAP "IAP enabled" OFF)
 option(GOLD "Gold build" OFF)
 option(OPENXR "Enable OpenXR VR support" OFF)
+option(OPENXR_VALIDATION "Enable OpenXR validation layer (requires XR_APILAYER_LUNARG_core_validation)" OFF)
 
 if(USE_CCACHE)
 	include(ccache)
@@ -963,6 +964,10 @@ if(WIN32 AND OPENXR)
 		XR_USE_PLATFORM_WIN32=1
 		XR_USE_GRAPHICS_API_OPENGL=1
 	)
+endif()
+
+if(OPENXR_VALIDATION)
+	target_compile_definitions(Common PRIVATE OPENXR_VALIDATION=1)
 endif()
 
 target_link_libraries(Common Ext::Snappy cpu_features)
