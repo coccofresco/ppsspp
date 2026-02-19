@@ -67,6 +67,28 @@ void VR_Init( void* system, const char* name, int version ) {
 	}
 #endif
 
+	// Check for depth composition layer extension (all platforms)
+	{
+		uint32_t extCount = 0;
+		xrEnumerateInstanceExtensionProperties(nullptr, 0, &extCount, nullptr);
+		if (extCount > 0) {
+			std::vector<XrExtensionProperties> extProps(extCount);
+			for (uint32_t i = 0; i < extCount; i++) {
+				extProps[i].type = XR_TYPE_EXTENSION_PROPERTIES;
+				extProps[i].next = nullptr;
+			}
+			xrEnumerateInstanceExtensionProperties(nullptr, extCount, &extCount, extProps.data());
+			for (const auto& ext : extProps) {
+				if (strcmp(ext.extensionName, XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME) == 0) {
+					extensions.push_back(XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME);
+					VR_SetPlatformFLag(VR_PLATFORM_EXTENSION_DEPTH, true);
+					VRLog("[VR_Init] Depth composition layer extension available and enabled");
+					break;
+				}
+			}
+		}
+	}
+
 	// Create the OpenXR instance.
 	XrApplicationInfo appInfo;
 	memset(&appInfo, 0, sizeof(appInfo));

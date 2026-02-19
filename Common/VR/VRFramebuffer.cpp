@@ -20,6 +20,7 @@
 #include <cmath>
 #include <ctime>
 #include <cassert>
+#include <vector>
 
 extern void VRLog(const char* msg);
 
@@ -49,6 +50,11 @@ void ovrFramebuffer_Clear(ovrFramebuffer* frameBuffer) {
 	frameBuffer->ColorSwapChain.Width = 0;
 	frameBuffer->ColorSwapChain.Height = 0;
 	frameBuffer->ColorSwapChainImage = NULL;
+	frameBuffer->DepthSwapChain.Handle = XR_NULL_HANDLE;
+	frameBuffer->DepthSwapChain.Width = 0;
+	frameBuffer->DepthSwapChain.Height = 0;
+	frameBuffer->DepthSwapChainImage = NULL;
+	frameBuffer->HasDepthSwapchain = false;
 
 	frameBuffer->GLDepthBuffers = NULL;
 	frameBuffer->GLFrameBuffers = NULL;
@@ -150,6 +156,82 @@ static bool ovrFramebuffer_CreateGL(XrSession session, ovrFramebuffer* frameBuff
 		}
 	}
 
+	// Attempt to create depth swapchain for runtime reprojection
+	frameBuffer->HasDepthSwapchain = false;
+	if (VR_GetPlatformFlag(VR_PLATFORM_EXTENSION_DEPTH)) {
+		// Enumerate supported swapchain formats to find a depth format
+		uint32_t formatCount = 0;
+		xrEnumerateSwapchainFormats(session, 0, &formatCount, nullptr);
+		if (formatCount > 0) {
+			std::vector<int64_t> formats(formatCount);
+			xrEnumerateSwapchainFormats(session, formatCount, &formatCount, formats.data());
+
+			// Prefer 32F > 24 > 16 depth formats
+			const int64_t preferredDepthFormats[] = {
+				GL_DEPTH_COMPONENT32F,
+				GL_DEPTH_COMPONENT24,
+				GL_DEPTH_COMPONENT16,
+			};
+			int64_t depthFormat = 0;
+			for (auto preferred : preferredDepthFormats) {
+				for (auto available : formats) {
+					if (available == preferred) {
+						depthFormat = preferred;
+						break;
+					}
+				}
+				if (depthFormat) break;
+			}
+
+			if (depthFormat != 0) {
+				XrSwapchainCreateInfo depthCI = {};
+				depthCI.type = XR_TYPE_SWAPCHAIN_CREATE_INFO;
+				depthCI.usageFlags = XR_SWAPCHAIN_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+				depthCI.format = depthFormat;
+				depthCI.sampleCount = 1;
+				depthCI.width = width;
+				depthCI.height = height;
+				depthCI.faceCount = 1;
+				depthCI.arraySize = 1;
+				depthCI.mipCount = 1;
+
+				XrResult depthResult = xrCreateSwapchain(session, &depthCI, &frameBuffer->DepthSwapChain.Handle);
+				if (XR_SUCCEEDED(depthResult)) {
+					frameBuffer->DepthSwapChain.Width = width;
+					frameBuffer->DepthSwapChain.Height = height;
+
+					// Enumerate depth swapchain images
+					uint32_t depthImageCount = 0;
+					xrEnumerateSwapchainImages(frameBuffer->DepthSwapChain.Handle, 0, &depthImageCount, NULL);
+					frameBuffer->DepthSwapChainImage = malloc(depthImageCount * sizeof(XR_GL_IMAGE));
+					for (uint32_t i = 0; i < depthImageCount; i++) {
+						((XR_GL_IMAGE*)frameBuffer->DepthSwapChainImage)[i].type = XR_GL_SWAPCHAIN;
+						((XR_GL_IMAGE*)frameBuffer->DepthSwapChainImage)[i].next = NULL;
+					}
+					xrEnumerateSwapchainImages(
+						frameBuffer->DepthSwapChain.Handle,
+						depthImageCount, &depthImageCount,
+						(XrSwapchainImageBaseHeader*)frameBuffer->DepthSwapChainImage);
+
+					frameBuffer->HasDepthSwapchain = true;
+
+					{
+						char buf[256];
+						snprintf(buf, sizeof(buf), "[VR] Depth swapchain created: format=0x%X %dx%d images=%u",
+							(unsigned int)depthFormat, width, height, depthImageCount);
+						VRLog(buf);
+					}
+				} else {
+					char buf[256];
+					snprintf(buf, sizeof(buf), "[VR] Depth swapchain creation failed: result=%d (SteamVR OpenGL depth bug?)", (int)depthResult);
+					VRLog(buf);
+				}
+			} else {
+				VRLog("[VR] No depth swapchain format available from runtime");
+			}
+		}
+	}
+
 	return true;
 }
 
@@ -162,6 +244,10 @@ void ovrFramebuffer_Destroy(ovrFramebuffer* frameBuffer) {
 	free(frameBuffer->GLDepthBuffers);
 	free(frameBuffer->GLFrameBuffers);
 #endif
+	if (frameBuffer->HasDepthSwapchain) {
+		xrDestroySwapchain(frameBuffer->DepthSwapChain.Handle);
+		free(frameBuffer->DepthSwapChainImage);
+	}
 	OXR(xrDestroySwapchain(frameBuffer->ColorSwapChain.Handle));
 	free(frameBuffer->ColorSwapChainImage);
 
@@ -185,6 +271,15 @@ void ovrFramebuffer_Acquire(ovrFramebuffer* frameBuffer) {
 	waitInfo.timeout = XR_INFINITE_DURATION;
 	XrResult res = xrWaitSwapchainImage(frameBuffer->ColorSwapChain.Handle, &waitInfo);
 	frameBuffer->Acquired = res == XR_SUCCESS;
+
+	if (frameBuffer->HasDepthSwapchain) {
+		uint32_t depthIndex;
+		XrSwapchainImageAcquireInfo depthAcquireInfo = {XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO, NULL};
+		xrAcquireSwapchainImage(frameBuffer->DepthSwapChain.Handle, &depthAcquireInfo, &depthIndex);
+		XrSwapchainImageWaitInfo depthWaitInfo = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO, NULL, XR_INFINITE_DURATION};
+		xrWaitSwapchainImage(frameBuffer->DepthSwapChain.Handle, &depthWaitInfo);
+		// depthIndex should match TextureSwapChainIndex; both cycle in lockstep
+	}
 
 	ovrFramebuffer_SetCurrent(frameBuffer);
 
@@ -215,6 +310,11 @@ void ovrFramebuffer_Release(ovrFramebuffer* frameBuffer) {
 		GL(glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE));
 
 #endif
+
+		if (frameBuffer->HasDepthSwapchain) {
+			XrSwapchainImageReleaseInfo depthReleaseInfo = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO, NULL};
+			xrReleaseSwapchainImage(frameBuffer->DepthSwapChain.Handle, &depthReleaseInfo);
+		}
 
 		XrSwapchainImageReleaseInfo releaseInfo = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO, NULL};
 		OXR(xrReleaseSwapchainImage(frameBuffer->ColorSwapChain.Handle, &releaseInfo));

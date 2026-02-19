@@ -67,11 +67,14 @@ typedef struct {
 	uint32_t TextureSwapChainLength;
 	uint32_t TextureSwapChainIndex;
 	ovrSwapChain ColorSwapChain;
+	ovrSwapChain DepthSwapChain;
 	void* ColorSwapChainImage;
+	void* DepthSwapChainImage;
 	unsigned int* GLDepthBuffers;
 	unsigned int* GLFrameBuffers;
 
 	bool Acquired;
+	bool HasDepthSwapchain;
 } ovrFramebuffer;
 
 typedef struct {
@@ -122,6 +125,7 @@ enum VRPlatformFlag {
 	VR_PLATFORM_EXTENSION_INSTANCE,
 	VR_PLATFORM_EXTENSION_PASSTHROUGH,
 	VR_PLATFORM_EXTENSION_PERFORMANCE,
+	VR_PLATFORM_EXTENSION_DEPTH,
 	VR_PLATFORM_TRACKING_FLOOR,
 	VR_PLATFORM_MAX
 };

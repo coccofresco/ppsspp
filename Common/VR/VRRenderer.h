@@ -14,6 +14,8 @@ enum VRConfig {
 	VR_CONFIG_CURRENT_FBO,
 	//anti-flickering
 	VR_CONFIG_ANTI_FLICKERING,
+	//depth submission
+	VR_CONFIG_DEPTH_SUBMIT,
 
 	//end
 	VR_CONFIG_MAX
