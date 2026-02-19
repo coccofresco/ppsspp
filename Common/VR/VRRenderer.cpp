@@ -504,10 +504,11 @@ void VR_FinishFrame( engine_t* engine ) {
 		// On Windows, use quad layer for cross-runtime compatibility
 		// (SteamVR does not support XR_KHR_composition_layer_cylinder)
 		float aspect = VR_GetConfigFloat(VR_CONFIG_CANVAS_ASPECT);
-		if (headTracking && !reprojection) {
-			float width = (float)engine->appState.ViewConfigurationView[0].recommendedImageRectWidth;
-			float height = (float)engine->appState.ViewConfigurationView[0].recommendedImageRectHeight;
-			aspect = 2.0f * width / height;
+		bool antiFlickering = vrConfig[VR_CONFIG_ANTI_FLICKERING] != 0;
+		if (antiFlickering || (headTracking && !reprojection)) {
+			// Game rendered at 2x width (M[0] halved), so display aspect doubles.
+			// For PSP native 480:272 = 1.765:1, doubled = 3.53:1
+			aspect *= 2.0f;
 		}
 
 		// Screen size driven by fCanvasDistance and fFieldOfViewPercentage.
