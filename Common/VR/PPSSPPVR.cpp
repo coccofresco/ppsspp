@@ -607,7 +607,7 @@ bool StartVRRender() {
 		M[10] = -1;
 		M[11] = -1;
 		M[14] = -(nearZ + nearZ);
-		if (IsImmersiveVRMode()) {
+		if (IsImmersiveVRMode() || VR_GetConfig(VR_CONFIG_ANTI_FLICKERING)) {
 			M[0] /= 2.0f;
 		}
 		memcpy(vrMatrix[VR_PROJECTION_MATRIX], M, sizeof(float) * 16);
@@ -621,6 +621,12 @@ bool StartVRRender() {
 		// only quad/cylinder composition layers are needed for cinema.
 		VR_SetConfig(VR_CONFIG_MODE, VR_MODE_MONO_SCREEN);
 		vrFlatGame = true;
+
+		// Anti-flickering: enable wide-FOV rendering in cinema mode.
+		// Game renders at 2:1 aspect (halved M[0]), camera pose is fixed,
+		// quad layer is world-locked so runtime reprojects smoothly.
+		VR_SetConfig(VR_CONFIG_ANTI_FLICKERING, 1);
+		VR_SetConfig(VR_CONFIG_REPROJECTION, 0);
 #else
 		if (!IsBigScreenVRMode() && (appMode == VR_GAME_MODE)) {
 			VR_SetConfig(VR_CONFIG_MODE, vrStereo ? VR_MODE_STEREO_6DOF : VR_MODE_MONO_6DOF);
