@@ -1251,47 +1251,6 @@ void GLQueueRunner::PerformRenderPass(const GLRStep &step, bool first, bool last
 			} else {
 				glDrawArrays(c.draw.mode, c.draw.first, c.draw.count);
 			}
-			// VR diagnostic: after draw on backbuffer (VR FBO), log GL state
-			if (!curFB_ && IsVREnabled()) {
-				static int vrDrawDiag = 0;
-				// Log first 5 draws, then every 500th draw (covers gameplay)
-				if (vrDrawDiag < 5 || (vrDrawDiag % 500 == 0 && vrDrawDiag < 10000)) {
-					GLenum err = glGetError();
-					GLint drawFbo = 0;
-					glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFbo);
-					// Expert-recommended state checks
-					GLboolean scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
-					GLboolean colorMaskRGBA[4] = {};
-					glGetBooleanv(GL_COLOR_WRITEMASK, colorMaskRGBA);
-					GLint drawBuf = 0;
-					glGetIntegerv(GL_DRAW_BUFFER0, &drawBuf);
-					GLint fbComplete = 0;
-					fbComplete = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
-					// Read center pixel from VR FBO (must bind READ to draw FBO first)
-					GLint prevReadFbo = 0;
-					glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevReadFbo);
-					glBindFramebuffer(GL_READ_FRAMEBUFFER, drawFbo);
-					uint8_t pixel[4] = {0, 0, 0, 0};
-					glReadPixels(curFBWidth_ / 2, curFBHeight_ / 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
-					glBindFramebuffer(GL_READ_FRAMEBUFFER, prevReadFbo);
-					GLenum err2 = glGetError();
-					char dbuf[512];
-					snprintf(dbuf, sizeof(dbuf),
-						"[VR-DRAW] #%d fbo=%d tex=%u vp=%.0f,%.0f,%.0f,%.0f sc=%d,%d,%d,%d "
-						"scissorOn=%d cMask=%d%d%d%d drawBuf=0x%X fbStat=0x%X "
-						"px=(%d,%d,%d,%d) err=%d/%d curFBW=%d curFBH=%d",
-						vrDrawDiag, drawFbo, curTex[0] ? curTex[0]->texture : 0,
-						viewport.x, viewport.y, viewport.w, viewport.h,
-						scissorRc.x, scissorRc.y, scissorRc.w, scissorRc.h,
-						(int)scissorEnabled,
-						(int)colorMaskRGBA[0], (int)colorMaskRGBA[1], (int)colorMaskRGBA[2], (int)colorMaskRGBA[3],
-						drawBuf, fbComplete,
-						pixel[0], pixel[1], pixel[2], pixel[3], (int)err, (int)err2,
-						curFBWidth_, curFBHeight_);
-					VRLog(dbuf);
-				}
-				vrDrawDiag++;
-			}
 			CHECK_GL_ERROR_IF_DEBUG();
 			break;
 		}
@@ -1485,31 +1444,6 @@ void GLQueueRunner::PerformRenderPass(const GLRStep &step, bool first, bool last
 	}
 	if ((colorMask & 15) != 15)
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-
-	// VR diagnostic: after ALL commands in BackBuffer step, read center pixel
-	if (!curFB_ && IsVREnabled()) {
-		static int vrEndDiag = 0;
-		if (vrEndDiag < 5 || (vrEndDiag % 120 == 0 && vrEndDiag < 3000)) {
-			GLint drawFbo = 0;
-			glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFbo);
-			GLint prevReadFbo = 0;
-			glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevReadFbo);
-			glBindFramebuffer(GL_READ_FRAMEBUFFER, drawFbo);
-			uint8_t pixel[4] = {0, 0, 0, 0};
-			glReadPixels(curFBWidth_ / 2, curFBHeight_ / 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
-			glBindFramebuffer(GL_READ_FRAMEBUFFER, prevReadFbo);
-			// Also check depth/blend state at end
-			GLboolean depthOn = glIsEnabled(GL_DEPTH_TEST);
-			GLboolean blendOn = glIsEnabled(GL_BLEND);
-			char dbuf[256];
-			snprintf(dbuf, sizeof(dbuf),
-				"[VR-END] #%d fbo=%d px=(%d,%d,%d,%d) depth=%d blend=%d cmds=%d tag='%s'",
-				vrEndDiag, drawFbo, pixel[0], pixel[1], pixel[2], pixel[3],
-				(int)depthOn, (int)blendOn, (int)step.commands.size(), step.tag);
-			VRLog(dbuf);
-		}
-		vrEndDiag++;
-	}
 
 	CHECK_GL_ERROR_IF_DEBUG();
 }
