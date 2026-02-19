@@ -283,6 +283,9 @@ void MainThreadFunc() {
 		if (glCtx) {
 			InitVROnWindows(glCtx->GetHDC(), glCtx->GetHGLRC());
 			SetVRCallbacks(NativeAxis, NativeKey, NativeTouch);
+
+			// Display resolution override happens in StartVRRender() after
+			// VR_InitRenderer has populated the swapchain dimensions.
 		}
 	}
 #endif
@@ -304,7 +307,8 @@ void MainThreadFunc() {
 #if OPENXR
 			if (IsVREnabled()) {
 				UpdateVRInput(g_Config.bHapticFeedback, g_display.dpi_scale_x, g_display.dpi_scale_y);
-				FinishVRRender();  // xrEndFrame
+				// FinishVRRender (xrEndFrame) moved to render thread in GLRenderManager::Run()
+				// to ensure it runs AFTER PostVRFrameRender releases the swapchain image.
 			}
 #endif
 

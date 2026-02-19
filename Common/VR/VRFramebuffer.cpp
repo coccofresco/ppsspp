@@ -21,6 +21,8 @@
 #include <ctime>
 #include <cassert>
 
+extern void VRLog(const char* msg);
+
 #if !defined(_WIN32)
 #include <pthread.h>
 #endif
@@ -187,6 +189,30 @@ void ovrFramebuffer_Acquire(ovrFramebuffer* frameBuffer) {
 	ovrFramebuffer_SetCurrent(frameBuffer);
 
 #if XR_USE_GRAPHICS_API_OPENGL_ES || XR_USE_GRAPHICS_API_OPENGL
+	// === DIAGNOSTIC: verify acquiredIndex matches attached texture ===
+	{
+		static int acquireDiag = 0;
+		if (acquireDiag < 10 || (acquireDiag % 120 == 0 && acquireDiag < 3000)) {
+			uint32_t idx = frameBuffer->TextureSwapChainIndex;
+			GLuint expectedTex = ((XR_GL_IMAGE*)frameBuffer->ColorSwapChainImage)[idx].image;
+			GLint attachedTex = 0;
+			glGetFramebufferAttachmentParameteriv(
+				GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+				GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &attachedTex);
+			GLint boundFbo = 0;
+			glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &boundFbo);
+			char buf[256];
+			snprintf(buf, sizeof(buf),
+				"[VR-ACQ] idx=%u expectedTex=%u attachedTex=%d boundFbo=%d fbo[idx]=%u chainLen=%u %s",
+				idx, expectedTex, attachedTex, boundFbo,
+				frameBuffer->GLFrameBuffers[idx],
+				frameBuffer->TextureSwapChainLength,
+				(expectedTex == (GLuint)attachedTex) ? "MATCH" : "MISMATCH!");
+			VRLog(buf);
+		}
+		acquireDiag++;
+	}
+
 	GL(glEnable( GL_SCISSOR_TEST ));
 	GL(glViewport( 0, 0, frameBuffer->Width, frameBuffer->Height ));
 	GL(glClearColor( 0.0f, 0.0f, 0.0f, 1.0f ));
@@ -199,17 +225,57 @@ void ovrFramebuffer_Acquire(ovrFramebuffer* frameBuffer) {
 
 void ovrFramebuffer_Release(ovrFramebuffer* frameBuffer) {
 	if (frameBuffer->Acquired) {
-		XrSwapchainImageReleaseInfo releaseInfo = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO, NULL};
-		OXR(xrReleaseSwapchainImage(frameBuffer->ColorSwapChain.Handle, &releaseInfo));
-		frameBuffer->Acquired = false;
-
-		// Clear the alpha channel, other way OpenXR would not transfer the framebuffer fully
 #if XR_USE_GRAPHICS_API_OPENGL_ES || XR_USE_GRAPHICS_API_OPENGL
+		// Ensure we're bound to the correct VR FBO before alpha clear
+		ovrFramebuffer_SetCurrent(frameBuffer);
+
+		// Clear the alpha channel to 1.0 BEFORE releasing to OpenXR.
+		// MUST disable scissor — PPSSPP 3D rendering may leave scissor enabled,
+		// and glClear is affected by scissor test, causing partial alpha clear.
+		GL(glDisable(GL_SCISSOR_TEST));
 		GL(glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE));
 		GL(glClearColor(0.0f, 0.0f, 0.0f, 1.0f));
 		GL(glClear(GL_COLOR_BUFFER_BIT));
 		GL(glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE));
+
+		// === DIAGNOSTIC: verify FBO/texture match + post-clear alpha ===
+		{
+			static int relDiag = 0;
+			if (relDiag < 10 || (relDiag % 120 == 0 && relDiag < 3000)) {
+				uint32_t idx = frameBuffer->TextureSwapChainIndex;
+				GLuint expectedTex = ((XR_GL_IMAGE*)frameBuffer->ColorSwapChainImage)[idx].image;
+				GLint attachedTex = 0;
+				glGetFramebufferAttachmentParameteriv(
+					GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+					GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &attachedTex);
+				GLint boundFbo = 0;
+				glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &boundFbo);
+
+				// Read center pixel to verify alpha clear worked
+				GLint prevRead = 0;
+				glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevRead);
+				glBindFramebuffer(GL_READ_FRAMEBUFFER, boundFbo);
+				uint8_t px[4] = {0,0,0,0};
+				glReadPixels(frameBuffer->Width/2, frameBuffer->Height/2, 1, 1,
+					GL_RGBA, GL_UNSIGNED_BYTE, px);
+				glBindFramebuffer(GL_READ_FRAMEBUFFER, prevRead);
+
+				char buf[320];
+				snprintf(buf, sizeof(buf),
+					"[VR-REL] idx=%u expectedTex=%u attachedTex=%d boundFbo=%d fbo[idx]=%u px=(%u,%u,%u,%u) %s",
+					idx, expectedTex, attachedTex, boundFbo,
+					frameBuffer->GLFrameBuffers[idx],
+					px[0], px[1], px[2], px[3],
+					(expectedTex == (GLuint)attachedTex) ? "MATCH" : "MISMATCH!");
+				VRLog(buf);
+			}
+			relDiag++;
+		}
 #endif
+
+		XrSwapchainImageReleaseInfo releaseInfo = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO, NULL};
+		OXR(xrReleaseSwapchainImage(frameBuffer->ColorSwapChain.Handle, &releaseInfo));
+		frameBuffer->Acquired = false;
 	}
 }
 

@@ -53,6 +53,7 @@ void SetVRCompat(VRCompatFlag flag, long value);
 
 // VR rendering integration
 void* BindVRFramebuffer();
+void GetVRFramebufferSize(int *width, int *height);
 bool StartVRRender();
 void FinishVRRender();
 void RecenterScreen();

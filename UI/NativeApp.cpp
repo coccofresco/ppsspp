@@ -45,6 +45,11 @@
 #include "Windows/CaptureDevice.h"
 #endif
 
+#if OPENXR
+#include "Common/VR/PPSSPPVR.h"
+#include "Common/VR/VRRenderer.h"
+#endif
+
 #include "Common/Net/HTTPClient.h"
 #include "Common/Net/Resolve.h"
 #include "Common/Net/URL.h"
@@ -1572,6 +1577,21 @@ bool Native_UpdateScreenScale(int pixel_width, int pixel_height, float customSca
 	if (g_logical_dpi < 0.0f) {
 		g_logical_dpi = 96.0f;
 	}
+
+	// When VR is active, use VR swapchain resolution instead of window size.
+	// This mirrors the Android approach in backbufferResize().
+	// Use cached VR_CONFIG values (set by VR_InitRenderer) instead of
+	// GetVRResolutionPerEye which does heavy OpenXR enumeration calls.
+#if OPENXR
+	if (IsVREnabled()) {
+		int vrW = VR_GetConfig(VR_CONFIG_VIEWPORT_WIDTH);
+		int vrH = VR_GetConfig(VR_CONFIG_VIEWPORT_HEIGHT);
+		if (vrW > 0 && vrH > 0) {
+			pixel_width = vrW;
+			pixel_height = vrH;
+		}
+	}
+#endif
 
 	bool smallWindow = IsWindowSmall(pixel_width, pixel_height);
 	if (smallWindow) {

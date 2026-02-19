@@ -436,6 +436,13 @@ bool GLRenderManager::Run(GLRRenderThreadTask &task) {
 	GLFrameData &frameData = frameData_[task.frame];
 
 	if (task.runType == GLRRunType::PRESENT) {
+		// Complete the VR frame on the render thread, AFTER the SUBMIT task
+		// has released the swapchain image via PostVRFrameRender.
+		// xrEndFrame requires swapchain images to be released first.
+		if (IsVREnabled()) {
+			FinishVRRender();
+		}
+
 		bool swapRequest = false;
 		if (!frameData.skipSwap) {
 			frameTimeHistory_[frameData.frameId].queuePresent = time_now_d();

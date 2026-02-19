@@ -20,8 +20,11 @@
 #include "Core/HLE/sceCtrl.h"
 
 #include "Core/Config.h"
+#include "Core/ConfigValues.h"
 #include "Core/KeyMap.h"
 #include "Core/System.h"
+#include "Common/System/NativeApp.h"
+#include "Common/System/Display.h"
 
 enum VRMatrix {
 	VR_PROJECTION_MATRIX,
@@ -548,10 +551,31 @@ void* BindVRFramebuffer() {
 	return VR_BindFramebuffer(VR_GetEngine());
 }
 
+void GetVRFramebufferSize(int *width, int *height) {
+	*width = VR_GetConfig(VR_CONFIG_VIEWPORT_WIDTH);
+	*height = VR_GetConfig(VR_CONFIG_VIEWPORT_HEIGHT);
+}
+
 bool StartVRRender() {
 	if (!VR_GetConfig(VR_CONFIG_VIEWPORT_VALID)) {
 		VR_InitRenderer(VR_GetEngine());
 		VR_SetConfig(VR_CONFIG_VIEWPORT_VALID, true);
+
+#if XR_USE_PLATFORM_WIN32
+		// On Windows, override PPSSPP's display resolution to match VR swapchain.
+		// This mirrors the Android approach in backbufferResize().
+		// Must happen after VR_InitRenderer which populates swapchain dimensions.
+		{
+			int vrW = VR_GetConfig(VR_CONFIG_VIEWPORT_WIDTH);
+			int vrH = VR_GetConfig(VR_CONFIG_VIEWPORT_HEIGHT);
+			if (vrW > 0 && vrH > 0) {
+				PSP_CoreParameter().pixelWidth = vrW;
+				PSP_CoreParameter().pixelHeight = vrH;
+				Native_UpdateScreenScale(vrW, vrH, UIScaleFactorToMultiplier(g_Config.iUIScaleFactor));
+				NativeResized();
+			}
+		}
+#endif
 	}
 
 	if (VR_InitFrame(VR_GetEngine())) {
@@ -591,6 +615,13 @@ bool StartVRRender() {
 		// Decide if the scene is 3D or not
 		VR_SetConfigFloat(VR_CONFIG_CANVAS_ASPECT, 480.0f / 272.0f);
 		bool vrStereo = !PSP_CoreParameter().compat.vrCompat().ForceMono && g_Config.bEnableStereo;
+#if XR_USE_PLATFORM_WIN32
+		// Phase 1: Force cinema screen mode on Windows.
+		// 6DOF projection layers cause black screen via Quest Link —
+		// only quad/cylinder composition layers are needed for cinema.
+		VR_SetConfig(VR_CONFIG_MODE, VR_MODE_MONO_SCREEN);
+		vrFlatGame = true;
+#else
 		if (!IsBigScreenVRMode() && (appMode == VR_GAME_MODE)) {
 			VR_SetConfig(VR_CONFIG_MODE, vrStereo ? VR_MODE_STEREO_6DOF : VR_MODE_MONO_6DOF);
 			VR_SetConfig(VR_CONFIG_REPROJECTION, IsImmersiveVRMode() ? 0 : 1);
@@ -603,13 +634,21 @@ bool StartVRRender() {
 		} else {
 			VR_SetConfig(VR_CONFIG_MODE, VR_MODE_MONO_SCREEN);
 		}
+#endif
 		vr3DGeometryCount /= 2;
 
 		// Set compatibility
 		vrCompat[VR_COMPAT_SKYPLANE] = PSP_CoreParameter().compat.vrCompat().Skyplane;
 
 		// Set customizations
+#if XR_USE_PLATFORM_WIN32
+		// Windows forces cinema/quad mode — always use the cinema canvas distance.
+		// fCanvas3DDistance (default 3.0) produces negative placement in the
+		// dist = canvasDist/4 - 1 formula, putting the quad behind the user.
+		VR_SetConfigFloat(VR_CONFIG_CANVAS_DISTANCE, g_Config.fCanvasDistance);
+#else
 		VR_SetConfigFloat(VR_CONFIG_CANVAS_DISTANCE, !IsBigScreenVRMode() && (appMode == VR_GAME_MODE) ? g_Config.fCanvas3DDistance : g_Config.fCanvasDistance);
+#endif
 		VR_SetConfigFloat(VR_CONFIG_FOV_SCALE, g_Config.fFieldOfViewPercentage / 100.0f);
 		VR_SetConfig(VR_CONFIG_PASSTHROUGH, g_Config.bPassthrough && IsPassthroughSupported());
 		return true;

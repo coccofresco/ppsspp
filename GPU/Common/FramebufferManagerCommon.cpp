@@ -18,6 +18,8 @@
 #include <algorithm>
 #include <sstream>
 #include <cmath>
+#include <cstdio>
+extern void VRLog(const char* msg);
 
 #include "Common/GPU/thin3d.h"
 #include "Common/Data/Collections/TinySet.h"
@@ -1691,6 +1693,17 @@ void FramebufferManagerCommon::PrepareCopyDisplayToOutput(const DisplayLayoutCon
 
 	if (vfb->fbo) {
 		_dbg_assert_(useBufferedRendering_);
+		{
+			static int prepCount = 0;
+			if (prepCount < 300) {
+				char buf[256];
+				snprintf(buf, sizeof(buf), "[VR-DBG] PrepareCopy: VFB addr=%08x fbo=%p %dx%d render=%dx%d",
+					vfb->fb_address, (void*)vfb->fbo, vfb->bufferWidth, vfb->bufferHeight,
+					vfb->renderWidth, vfb->renderHeight);
+				VRLog(buf);
+				prepCount++;
+			}
+		}
 		if (GetUIState() != UISTATE_PAUSEMENU) {
 			if (Core_IsStepping())
 				VERBOSE_LOG(Log::FrameBuf, "Displaying FBO %08x", vfb->fb_address);

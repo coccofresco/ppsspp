@@ -61,6 +61,11 @@
 
 #include "Common/GraphicsContext.h"
 
+#if OPENXR
+#include "Common/VR/PPSSPPVR.h"
+#include "Common/VR/VRRenderer.h"
+#endif
+
 #include "Windows/main.h"
 #ifndef _M_ARM
 #include "Windows/DinputDevice.h"
@@ -303,6 +308,21 @@ namespace MainWindow {
 			PSP_CoreParameter().pixelWidth = width;
 			PSP_CoreParameter().pixelHeight = height;
 		}
+
+#if OPENXR
+		// When VR is active, override pixel dimensions with VR swapchain resolution.
+		// Use cached VR_CONFIG values (safe to call from any thread).
+		if (IsVREnabled()) {
+			int vrW = VR_GetConfig(VR_CONFIG_VIEWPORT_WIDTH);
+			int vrH = VR_GetConfig(VR_CONFIG_VIEWPORT_HEIGHT);
+			if (vrW > 0 && vrH > 0) {
+				PSP_CoreParameter().pixelWidth = vrW;
+				PSP_CoreParameter().pixelHeight = vrH;
+				width = vrW;
+				height = vrH;
+			}
+		}
+#endif
 
 		DEBUG_LOG(Log::System, "Pixel width/height: %dx%d", PSP_CoreParameter().pixelWidth, PSP_CoreParameter().pixelHeight);
 

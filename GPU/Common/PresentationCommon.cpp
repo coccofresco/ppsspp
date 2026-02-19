@@ -19,6 +19,8 @@
 #include <cmath>
 #include <set>
 #include <cstdint>
+#include <cstdio>
+extern void VRLog(const char* msg);
 #include "Common/GPU/thin3d.h"
 
 #include "Common/System/Display.h"
@@ -902,10 +904,28 @@ void PresentationCommon::CopyToOutput(const DisplayLayoutConfig &config) {
 
 	if (!srcFramebuffer_ && !srcTexture_) {
 		// Bound blank. We're done (although we could draw a black rectangle here).
+		static int blankCount = 0;
+		if (blankCount < 300) {
+			char buf[256];
+			snprintf(buf, sizeof(buf), "[VR-DBG] CopyToOutput: BLANK srcFB=%p srcTex=%p postOut=%p pw=%d ph=%d",
+				(void*)srcFramebuffer_, (void*)srcTexture_, (void*)postShaderOutput_, pixelWidth_, pixelHeight_);
+			VRLog(buf);
+			blankCount++;
+		}
 		presentedThisFrame_ = true;
 		return;
 	}
 
+	{
+		static int okCount = 0;
+		if (okCount < 300) {
+			char buf[256];
+			snprintf(buf, sizeof(buf), "[VR-DBG] CopyToOutput: OK srcFB=%p srcTex=%p postOut=%p pw=%d ph=%d srcW=%d srcH=%d",
+				(void*)srcFramebuffer_, (void*)srcTexture_, (void*)postShaderOutput_, pixelWidth_, pixelHeight_, srcWidth_, srcHeight_);
+			VRLog(buf);
+			okCount++;
+		}
+	}
 	Draw::Pipeline *pipeline = (outputFlags_ & OutputFlags::RB_SWIZZLE) ? texColorRBSwizzle_ : texColor_;
 
 	if (useStereo) {

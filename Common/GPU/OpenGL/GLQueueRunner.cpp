@@ -8,6 +8,8 @@
 #include "Common/VR/PPSSPPVR.h"
 
 #include "Common/Log.h"
+#include <cstdio>
+extern void VRLog(const char* msg);
 #include "Common/LogReporting.h"
 #include "Common/MemoryUtil.h"
 #include "Common/StringUtils.h"
@@ -668,6 +670,33 @@ void GLQueueRunner::RunSteps(const std::vector<GLRStep *> &steps, GLFrameData &f
 	}
 
 	CHECK_GL_ERROR_IF_DEBUG();
+	{
+		static int stepsLogCount = 0;
+		// Log first 50, then every 120th frame (2x/sec at 60fps) to capture gameplay
+		if (useVR && (stepsLogCount < 50 || (stepsLogCount % 120 == 0 && stepsLogCount < 3000))) {
+			int nRender = 0, nBlit = 0, nCopy = 0, nOther = 0;
+			for (size_t j = 0; j < steps.size(); j++) {
+				switch (steps[j]->stepType) {
+				case GLRStepType::RENDER: nRender++; break;
+				case GLRStepType::BLIT: nBlit++; break;
+				case GLRStepType::COPY: nCopy++; break;
+				default: nOther++; break;
+				}
+			}
+			char buf[512];
+			snprintf(buf, sizeof(buf), "[VR-DBG] RunSteps[%d]: total=%d RENDER=%d BLIT=%d COPY=%d OTHER=%d",
+				stepsLogCount, (int)steps.size(), nRender, nBlit, nCopy, nOther);
+			VRLog(buf);
+			for (size_t j = 0; j < steps.size(); j++) {
+				if (steps[j]->stepType == GLRStepType::RENDER) {
+					snprintf(buf, sizeof(buf), "[VR-DBG]   step[%d] RENDER tag='%s' fb=%p cmds=%d",
+						(int)j, steps[j]->tag, (void*)steps[j]->render.framebuffer, (int)steps[j]->commands.size());
+					VRLog(buf);
+				}
+			}
+		}
+		stepsLogCount++;
+	}
 	size_t renderCount = 0;
 	for (size_t i = 0; i < steps.size(); i++) {
 		GLRStep &step = *steps[i];
@@ -1222,6 +1251,47 @@ void GLQueueRunner::PerformRenderPass(const GLRStep &step, bool first, bool last
 			} else {
 				glDrawArrays(c.draw.mode, c.draw.first, c.draw.count);
 			}
+			// VR diagnostic: after draw on backbuffer (VR FBO), log GL state
+			if (!curFB_ && IsVREnabled()) {
+				static int vrDrawDiag = 0;
+				// Log first 5 draws, then every 500th draw (covers gameplay)
+				if (vrDrawDiag < 5 || (vrDrawDiag % 500 == 0 && vrDrawDiag < 10000)) {
+					GLenum err = glGetError();
+					GLint drawFbo = 0;
+					glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFbo);
+					// Expert-recommended state checks
+					GLboolean scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
+					GLboolean colorMaskRGBA[4] = {};
+					glGetBooleanv(GL_COLOR_WRITEMASK, colorMaskRGBA);
+					GLint drawBuf = 0;
+					glGetIntegerv(GL_DRAW_BUFFER0, &drawBuf);
+					GLint fbComplete = 0;
+					fbComplete = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
+					// Read center pixel from VR FBO (must bind READ to draw FBO first)
+					GLint prevReadFbo = 0;
+					glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevReadFbo);
+					glBindFramebuffer(GL_READ_FRAMEBUFFER, drawFbo);
+					uint8_t pixel[4] = {0, 0, 0, 0};
+					glReadPixels(curFBWidth_ / 2, curFBHeight_ / 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+					glBindFramebuffer(GL_READ_FRAMEBUFFER, prevReadFbo);
+					GLenum err2 = glGetError();
+					char dbuf[512];
+					snprintf(dbuf, sizeof(dbuf),
+						"[VR-DRAW] #%d fbo=%d tex=%u vp=%.0f,%.0f,%.0f,%.0f sc=%d,%d,%d,%d "
+						"scissorOn=%d cMask=%d%d%d%d drawBuf=0x%X fbStat=0x%X "
+						"px=(%d,%d,%d,%d) err=%d/%d curFBW=%d curFBH=%d",
+						vrDrawDiag, drawFbo, curTex[0] ? curTex[0]->texture : 0,
+						viewport.x, viewport.y, viewport.w, viewport.h,
+						scissorRc.x, scissorRc.y, scissorRc.w, scissorRc.h,
+						(int)scissorEnabled,
+						(int)colorMaskRGBA[0], (int)colorMaskRGBA[1], (int)colorMaskRGBA[2], (int)colorMaskRGBA[3],
+						drawBuf, fbComplete,
+						pixel[0], pixel[1], pixel[2], pixel[3], (int)err, (int)err2,
+						curFBWidth_, curFBHeight_);
+					VRLog(dbuf);
+				}
+				vrDrawDiag++;
+			}
 			CHECK_GL_ERROR_IF_DEBUG();
 			break;
 		}
@@ -1415,6 +1485,32 @@ void GLQueueRunner::PerformRenderPass(const GLRStep &step, bool first, bool last
 	}
 	if ((colorMask & 15) != 15)
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+	// VR diagnostic: after ALL commands in BackBuffer step, read center pixel
+	if (!curFB_ && IsVREnabled()) {
+		static int vrEndDiag = 0;
+		if (vrEndDiag < 5 || (vrEndDiag % 120 == 0 && vrEndDiag < 3000)) {
+			GLint drawFbo = 0;
+			glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFbo);
+			GLint prevReadFbo = 0;
+			glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevReadFbo);
+			glBindFramebuffer(GL_READ_FRAMEBUFFER, drawFbo);
+			uint8_t pixel[4] = {0, 0, 0, 0};
+			glReadPixels(curFBWidth_ / 2, curFBHeight_ / 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+			glBindFramebuffer(GL_READ_FRAMEBUFFER, prevReadFbo);
+			// Also check depth/blend state at end
+			GLboolean depthOn = glIsEnabled(GL_DEPTH_TEST);
+			GLboolean blendOn = glIsEnabled(GL_BLEND);
+			char dbuf[256];
+			snprintf(dbuf, sizeof(dbuf),
+				"[VR-END] #%d fbo=%d px=(%d,%d,%d,%d) depth=%d blend=%d cmds=%d tag='%s'",
+				vrEndDiag, drawFbo, pixel[0], pixel[1], pixel[2], pixel[3],
+				(int)depthOn, (int)blendOn, (int)step.commands.size(), step.tag);
+			VRLog(dbuf);
+		}
+		vrEndDiag++;
+	}
+
 	CHECK_GL_ERROR_IF_DEBUG();
 }
 
@@ -1597,6 +1693,20 @@ void GLQueueRunner::PerformBindFramebufferAsRenderTarget(const GLRStep &pass) {
 	if (pass.render.framebuffer) {
 		curFBWidth_ = pass.render.framebuffer->width;
 		curFBHeight_ = pass.render.framebuffer->height;
+	} else if (IsVREnabled()) {
+		// When VR is active, the "backbuffer" is the VR swapchain FBO, not the desktop window.
+		// curFBWidth_/curFBHeight_ must match VR FBO dimensions so Y-flip math in
+		// VIEWPORT/SCISSOR commands (y = curFBHeight_ - y - h) produces correct coordinates.
+		// Using targetWidth_/targetHeight_ (desktop window size) would push the viewport off-screen.
+		int vrW, vrH;
+		GetVRFramebufferSize(&vrW, &vrH);
+		if (vrW > 0 && vrH > 0) {
+			curFBWidth_ = vrW;
+			curFBHeight_ = vrH;
+		} else {
+			curFBWidth_ = targetWidth_;
+			curFBHeight_ = targetHeight_;
+		}
 	} else {
 		curFBWidth_ = targetWidth_;
 		curFBHeight_ = targetHeight_;
@@ -1611,6 +1721,14 @@ void GLQueueRunner::PerformBindFramebufferAsRenderTarget(const GLRStep &pass) {
 		fbo_unbind();
 		if (IsVREnabled()) {
 			BindVRFramebuffer();
+			static int vrBindCount = 0;
+			if (vrBindCount < 300) {
+				char buf[256];
+				snprintf(buf, sizeof(buf), "[VR-DBG] BindFBO: VR redirect tag='%s' curFBW=%d curFBH=%d",
+					pass.tag, curFBWidth_, curFBHeight_);
+				VRLog(buf);
+				vrBindCount++;
+			}
 		}
 		// Backbuffer is now bound.
 	}

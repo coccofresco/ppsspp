@@ -579,16 +579,42 @@ void VR_FinishFrame( engine_t* engine ) {
 		endFrameInfo.layers = nullptr;
 	}
 	static int frameCounter = 0;
-	if (frameCounter < 5) {
+	// Log first 10 frames, then every 120th frame (covers gameplay transition)
+	if (frameCounter < 10 || (frameCounter % 120 == 0 && frameCounter < 3000)) {
 		char buf[512];
-		snprintf(buf, sizeof(buf), "[VR_FinishFrame] frame=%d shouldRender=%d layerCount=%d vrMode=%d swW=%d swH=%d",
+		snprintf(buf, sizeof(buf), "[VR_FinishFrame] frame=%d shouldRender=%d layerCount=%d vrMode=%d swAcquired=%d swW=%d swH=%d dist=%.3f fov=%.2f",
 			frameCounter, (int)frameState.shouldRender, endFrameInfo.layerCount, vrConfig[VR_CONFIG_MODE],
+			(int)engine->appState.Renderer.FrameBuffer[0].Acquired,
 			engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Width,
-			engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Height);
+			engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Height,
+			VR_GetConfigFloat(VR_CONFIG_CANVAS_DISTANCE),
+			VR_GetConfigFloat(VR_CONFIG_FOV_SCALE));
 		VRLog(buf);
+		// Log quad layer params (recompute from config since pos is block-scoped)
+		{
+			float d = VR_GetConfigFloat(VR_CONFIG_CANVAS_DISTANCE) / 4.0f - 1.0f;
+			float ad = fabs(d); if (ad < 0.5f) ad = 0.5f;
+			float fs = VR_GetConfigFloat(VR_CONFIG_FOV_SCALE); if (fs < 1.0f) fs = 1.0f;
+			float bw = ad * 0.8f; float sw = bw * fs;
+			float asp = VR_GetConfigFloat(VR_CONFIG_CANVAS_ASPECT);
+			float sh = (asp > 0) ? sw / asp : 0;
+			float menuYaw = ToRadians(VR_GetConfigFloat(VR_CONFIG_MENU_YAW));
+			float px = -sinf(menuYaw) * d;
+			float pz = -cosf(menuYaw) * d;
+			snprintf(buf, sizeof(buf), "[VR-QUAD] pos=(%.2f,0,%.2f) size=(%.3f,%.3f) dist=%.2f aspect=%.3f canvasDist=%.1f fovScale=%.2f",
+				px, pz, sw, sh, d, asp,
+				VR_GetConfigFloat(VR_CONFIG_CANVAS_DISTANCE),
+				VR_GetConfigFloat(VR_CONFIG_FOV_SCALE));
+			VRLog(buf);
+		}
 	}
 	frameCounter++;
-	OXR(xrEndFrame(engine->appState.Session, &endFrameInfo));
+	XrResult endResult = xrEndFrame(engine->appState.Session, &endFrameInfo);
+	if (XR_FAILED(endResult) && frameCounter <= 20) {
+		char buf[256];
+		snprintf(buf, sizeof(buf), "[VR_FinishFrame] xrEndFrame FAILED: %d", (int)endResult);
+		VRLog(buf);
+	}
 }
 
 int VR_GetConfig( VRConfig config ) {
