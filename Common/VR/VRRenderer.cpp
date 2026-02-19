@@ -501,62 +501,118 @@ void VR_FinishFrame( engine_t* engine ) {
 			engine->appState.Layers[engine->appState.LayerCount++].Cylinder = cylinder_layer;
 		}
 #else
-		// On Windows, use quad layer for cross-runtime compatibility
-		// (SteamVR does not support XR_KHR_composition_layer_cylinder)
-		float aspect = VR_GetConfigFloat(VR_CONFIG_CANVAS_ASPECT);
-		bool antiFlickering = vrConfig[VR_CONFIG_ANTI_FLICKERING] != 0;
-		if (antiFlickering || (headTracking && !reprojection)) {
-			// Game rendered at 2x width (M[0] halved), so display aspect doubles.
-			// For PSP native 480:272 = 1.765:1, doubled = 3.53:1
-			aspect *= 2.0f;
-		}
+		// Check if depth submission is available
+		bool depthAvailable = VR_GetPlatformFlag(VR_PLATFORM_EXTENSION_DEPTH)
+			&& engine->appState.Renderer.FrameBuffer[0].HasDepthSwapchain;
+		VR_SetConfig(VR_CONFIG_DEPTH_SUBMIT, depthAvailable ? 1 : 0);
 
-		// Screen size driven by fCanvasDistance and fFieldOfViewPercentage.
-		// fFieldOfViewPercentage (100-200) scales the screen's angular size:
-		// at 100% the screen subtends ~44 deg; at 200% it doubles.
-		// This single control satisfies both CINE-03 (screen size) and CINE-04 (FOV scale).
-		float fovScale = VR_GetConfigFloat(VR_CONFIG_FOV_SCALE);
-		if (fovScale < 1.0f) fovScale = 1.0f;
-		float absDistance = fabs(distance);
-		if (absDistance < 0.5f) absDistance = 0.5f;
-		float baseWidth = absDistance * 0.8f;  // subtends ~44 deg at scale 1.0
-		float screenWidth = baseWidth * fovScale;
-		float screenHeight = screenWidth / aspect;
-		if (screenHeight < 0.1f) screenHeight = 0.1f;
+		if (depthAvailable) {
+			// Projection layer path: cinema as content in projection views with depth
+			for (int eye = 0; eye < ovrMaxNumEyes; eye++) {
+				ovrFramebuffer* frameBuffer = &engine->appState.Renderer.FrameBuffer[0];
 
-		XrCompositionLayerQuad quad_layer = {};
-		quad_layer.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
-		quad_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
-		quad_layer.space = engine->appState.CurrentSpace;
-		memset(&quad_layer.subImage, 0, sizeof(XrSwapchainSubImage));
-		quad_layer.subImage.imageRect.offset.x = 0;
-		quad_layer.subImage.imageRect.offset.y = 0;
-		quad_layer.subImage.imageRect.extent.width = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Width;
-		quad_layer.subImage.imageRect.extent.height = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Height;
-		quad_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Handle;
-		quad_layer.subImage.imageArrayIndex = 0;
-		quad_layer.pose.orientation = XrQuaternionf_Multiply(pitch, yaw);
-		quad_layer.pose.position = pos;
-		quad_layer.size.width = screenWidth;
-		quad_layer.size.height = screenHeight;
+				memset(&projection_layer_elements[eye], 0, sizeof(XrCompositionLayerProjectionView));
+				projection_layer_elements[eye].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
+				projection_layer_elements[eye].pose = invViewTransform[eye];
+				projection_layer_elements[eye].fov = projections[eye].fov;
 
-		// Build the quad layer
-		if ((vrMode == VR_MODE_MONO_SCREEN) || (vrMode == VR_MODE_MONO_6DOF)) {
-			quad_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
-			engine->appState.Layers[engine->appState.LayerCount++].Quad = quad_layer;
-		} else if ((vrMode == VR_MODE_SBS_SCREEN) || (vrMode == VR_MODE_SBS_6DOF)) {
-			quad_layer.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
-			quad_layer.subImage.imageRect.extent.width /= 2;
-			engine->appState.Layers[engine->appState.LayerCount++].Quad = quad_layer;
-			quad_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
-			quad_layer.subImage.imageRect.offset.x += quad_layer.subImage.imageRect.extent.width;
-			engine->appState.Layers[engine->appState.LayerCount++].Quad = quad_layer;
+				memset(&projection_layer_elements[eye].subImage, 0, sizeof(XrSwapchainSubImage));
+				projection_layer_elements[eye].subImage.swapchain = frameBuffer->ColorSwapChain.Handle;
+				projection_layer_elements[eye].subImage.imageRect.offset.x = 0;
+				projection_layer_elements[eye].subImage.imageRect.offset.y = 0;
+				projection_layer_elements[eye].subImage.imageRect.extent.width = frameBuffer->ColorSwapChain.Width;
+				projection_layer_elements[eye].subImage.imageRect.extent.height = frameBuffer->ColorSwapChain.Height;
+				projection_layer_elements[eye].subImage.imageArrayIndex = 0;
+			}
+
+			// Chain depth info onto projection views
+			// Use static storage so the pointers remain valid until xrEndFrame
+			static XrCompositionLayerDepthInfoKHR depthInfo[2] = {};
+			for (int eye = 0; eye < ovrMaxNumEyes; eye++) {
+				ovrFramebuffer* frameBuffer = &engine->appState.Renderer.FrameBuffer[0];
+
+				depthInfo[eye] = {};
+				depthInfo[eye].type = XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR;
+				depthInfo[eye].next = NULL;
+				depthInfo[eye].subImage.swapchain = frameBuffer->DepthSwapChain.Handle;
+				depthInfo[eye].subImage.imageRect.offset = {0, 0};
+				depthInfo[eye].subImage.imageRect.extent.width = frameBuffer->DepthSwapChain.Width;
+				depthInfo[eye].subImage.imageRect.extent.height = frameBuffer->DepthSwapChain.Height;
+				depthInfo[eye].subImage.imageArrayIndex = 0;
+				depthInfo[eye].minDepth = 0.0f;
+				depthInfo[eye].maxDepth = 1.0f;
+				depthInfo[eye].nearZ = 0.01f;
+				depthInfo[eye].farZ = 100.0f;
+
+				// Chain onto projection view
+				projection_layer_elements[eye].next = &depthInfo[eye];
+			}
+
+			XrCompositionLayerProjection projection_layer = {};
+			projection_layer.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION;
+			projection_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+			projection_layer.space = engine->appState.CurrentSpace;
+			projection_layer.viewCount = ovrMaxNumEyes;
+			projection_layer.views = projection_layer_elements;
+
+			engine->appState.Layers[engine->appState.LayerCount++].Projection = projection_layer;
 		} else {
-			quad_layer.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
-			engine->appState.Layers[engine->appState.LayerCount++].Quad = quad_layer;
-			quad_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
-			quad_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[1].ColorSwapChain.Handle;
-			engine->appState.Layers[engine->appState.LayerCount++].Quad = quad_layer;
+			// Quad layer fallback: used when depth extension unavailable (e.g. SteamVR OpenGL)
+			float aspect = VR_GetConfigFloat(VR_CONFIG_CANVAS_ASPECT);
+			bool antiFlickering = vrConfig[VR_CONFIG_ANTI_FLICKERING] != 0;
+			if (antiFlickering || (headTracking && !reprojection)) {
+				// Game rendered at 2x width (M[0] halved), so display aspect doubles.
+				// For PSP native 480:272 = 1.765:1, doubled = 3.53:1
+				aspect *= 2.0f;
+			}
+
+			// Screen size driven by fCanvasDistance and fFieldOfViewPercentage.
+			// fFieldOfViewPercentage (100-200) scales the screen's angular size:
+			// at 100% the screen subtends ~44 deg; at 200% it doubles.
+			// This single control satisfies both CINE-03 (screen size) and CINE-04 (FOV scale).
+			float fovScale = VR_GetConfigFloat(VR_CONFIG_FOV_SCALE);
+			if (fovScale < 1.0f) fovScale = 1.0f;
+			float absDistance = fabs(distance);
+			if (absDistance < 0.5f) absDistance = 0.5f;
+			float baseWidth = absDistance * 0.8f;  // subtends ~44 deg at scale 1.0
+			float screenWidth = baseWidth * fovScale;
+			float screenHeight = screenWidth / aspect;
+			if (screenHeight < 0.1f) screenHeight = 0.1f;
+
+			XrCompositionLayerQuad quad_layer = {};
+			quad_layer.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
+			quad_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+			quad_layer.space = engine->appState.CurrentSpace;
+			memset(&quad_layer.subImage, 0, sizeof(XrSwapchainSubImage));
+			quad_layer.subImage.imageRect.offset.x = 0;
+			quad_layer.subImage.imageRect.offset.y = 0;
+			quad_layer.subImage.imageRect.extent.width = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Width;
+			quad_layer.subImage.imageRect.extent.height = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Height;
+			quad_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Handle;
+			quad_layer.subImage.imageArrayIndex = 0;
+			quad_layer.pose.orientation = XrQuaternionf_Multiply(pitch, yaw);
+			quad_layer.pose.position = pos;
+			quad_layer.size.width = screenWidth;
+			quad_layer.size.height = screenHeight;
+
+			// Build the quad layer
+			if ((vrMode == VR_MODE_MONO_SCREEN) || (vrMode == VR_MODE_MONO_6DOF)) {
+				quad_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+				engine->appState.Layers[engine->appState.LayerCount++].Quad = quad_layer;
+			} else if ((vrMode == VR_MODE_SBS_SCREEN) || (vrMode == VR_MODE_SBS_6DOF)) {
+				quad_layer.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
+				quad_layer.subImage.imageRect.extent.width /= 2;
+				engine->appState.Layers[engine->appState.LayerCount++].Quad = quad_layer;
+				quad_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
+				quad_layer.subImage.imageRect.offset.x += quad_layer.subImage.imageRect.extent.width;
+				engine->appState.Layers[engine->appState.LayerCount++].Quad = quad_layer;
+			} else {
+				quad_layer.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
+				engine->appState.Layers[engine->appState.LayerCount++].Quad = quad_layer;
+				quad_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
+				quad_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[1].ColorSwapChain.Handle;
+				engine->appState.Layers[engine->appState.LayerCount++].Quad = quad_layer;
+			}
 		}
 #endif
 	}
