@@ -607,7 +607,8 @@ bool StartVRRender() {
 		M[10] = -1;
 		M[11] = -1;
 		M[14] = -(nearZ + nearZ);
-		if (IsImmersiveVRMode() || VR_GetConfig(VR_CONFIG_ANTI_FLICKERING)) {
+		bool vrStereoActive = !PSP_CoreParameter().compat.vrCompat().ForceMono && g_Config.bEnableStereo && !IsBigScreenVRMode();
+		if (!vrStereoActive && (IsImmersiveVRMode() || VR_GetConfig(VR_CONFIG_ANTI_FLICKERING))) {
 			M[0] /= 2.0f;
 		}
 		memcpy(vrMatrix[VR_PROJECTION_MATRIX], M, sizeof(float) * 16);
@@ -857,9 +858,18 @@ void UpdateVRViewMatrices() {
 
 	// decompose rotation
 	XrVector3f rotation = XrQuaternionf_ToEulerAngles(invView.orientation);
-	float mPitch = mx * ToRadians(rotation.x);
-	float mYaw = my * ToRadians(rotation.y);
-	float mRoll = mz * ToRadians(rotation.z);
+	float sensitivity = g_Config.bHeadTracking ? g_Config.fHeadTrackingSensitivity : 1.0f;
+	float mPitch = mx * ToRadians(rotation.x * sensitivity);
+	float mYaw = my * ToRadians(rotation.y * sensitivity);
+	float mRoll = mz * ToRadians(rotation.z);  // Roll not user-mapped
+
+	// Soft clamp at high sensitivity to prevent uncomfortable over-rotation
+	if (g_Config.bHeadTracking && g_Config.fHeadTrackingSensitivity > 1.0f) {
+		float maxYaw = ToRadians(80.0f);
+		float maxPitch = ToRadians(60.0f);
+		mYaw = maxYaw * tanhf(mYaw / maxYaw);
+		mPitch = maxPitch * tanhf(mPitch / maxPitch);
+	}
 
 	// create updated quaternion
 	XrQuaternionf pitch = XrQuaternionf_CreateFromVectorAngle({1, 0, 0}, mPitch);
@@ -918,6 +928,11 @@ void UpdateVRViewMatrices() {
 			float dy = fabs(vrView[1].pose.position.y - vrView[0].pose.position.y);
 			float dz = fabs(vrView[1].pose.position.z - vrView[0].pose.position.z);
 			float ipd = sqrt(dx * dx + dy * dy + dz * dz);
+
+			// Apply stereo intensity: 0% = flat, 100% = natural headset IPD, >100% = exaggerated
+			float intensity = g_Config.fStereoIntensity / 100.0f;
+			ipd *= intensity;
+
 			XrVector3f separation = {ipd * scale * 0.5f, 0.0f, 0.0f};
 			separation = XrQuaternionf_Rotate(invView.orientation, separation);
 			separation = XrVector3f_ScalarMultiply(separation, mirrored ? -1.0f : 2.0f);

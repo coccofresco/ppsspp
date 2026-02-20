@@ -587,6 +587,9 @@ public:
 	bool bEnableVR;
 	bool bEnable6DoF;
 	bool bEnableStereo;
+	float fStereoIntensity;          // 0-150%, default 70 (moderate depth)
+	bool bHeadTracking;              // separate toggle from stereo
+	float fHeadTrackingSensitivity;  // 0.1-3.0, default 1.0 (1:1 natural)
 	bool bEnableImmersiveVR;
 	bool bForce72Hz;
 	bool bForceVR;
