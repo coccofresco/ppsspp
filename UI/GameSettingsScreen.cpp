@@ -1514,13 +1514,26 @@ void GameSettingsScreen::CreateVRSettings(UI::ViewGroup *vrSettings) {
 		vrSettings->Add(new ItemHeader(vr->T("Virtual reality")));
 		vrSettings->Add(new CheckBox(&g_Config.bEnableVR, vr->T("Virtual reality")));
 		vrSettings->Add(new CheckBox(&g_Config.bEnable6DoF, vr->T("6DoF movement")));
-		vrSettings->Add(new CheckBox(&g_Config.bEnableStereo, vr->T("Stereoscopic vision (Experimental)")));
 		vrSettings->Add(new CheckBox(&g_Config.bEnableImmersiveVR, vr->T("Enable immersive mode")));
 		if (IsPassthroughSupported()) {
 			vrSettings->Add(new CheckBox(&g_Config.bPassthrough, vr->T("Enable passthrough")));
 		}
 		vrSettings->Add(new CheckBox(&g_Config.bForce72Hz, vr->T("Force 72Hz update")));
 	}
+
+	vrSettings->Add(new ItemHeader(vr->T("Stereoscopic 3D")));
+	vrSettings->Add(new CheckBox(&g_Config.bEnableStereo, vr->T("Stereoscopic 3D")));
+	PopupSliderChoiceFloat *intensitySlider = vrSettings->Add(
+		new PopupSliderChoiceFloat(&g_Config.fStereoIntensity, 0.0f, 150.0f, 70.0f,
+			vr->T("3D Intensity"), 5.0f, screenManager(), "%"));
+	intensitySlider->SetEnabledPtr(&g_Config.bEnableStereo);
+
+	vrSettings->Add(new ItemHeader(vr->T("Head Tracking")));
+	vrSettings->Add(new CheckBox(&g_Config.bHeadTracking, vr->T("Head-tracked camera control")));
+	PopupSliderChoiceFloat *headSensitivitySlider = vrSettings->Add(
+		new PopupSliderChoiceFloat(&g_Config.fHeadTrackingSensitivity, 0.1f, 3.0f, 1.0f,
+			vr->T("Head tracking sensitivity"), 0.1f, screenManager(), "x"));
+	headSensitivitySlider->SetEnabledPtr(&g_Config.bHeadTracking);
 
 	vrSettings->Add(new ItemHeader(vr->T("VR camera")));
 	if (deviceType == DEVICE_TYPE_VR) {

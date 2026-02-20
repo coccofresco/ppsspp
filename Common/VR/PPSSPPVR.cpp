@@ -273,6 +273,21 @@ void UpdateVRInput(bool haptics, float dp_xscale, float dp_yscale) {
 		}
 	}
 
+	// Quick toggle: Left Grip + Right Grip + A = toggle stereo 3D
+	{
+		static bool prevStereoCombo = false;
+		int leftButtons = IN_VRGetButtonState(0);
+		int rightButtons = IN_VRGetButtonState(1);
+		bool leftGrip = (leftButtons & ovrButton_GripTrigger) != 0;
+		bool rightGrip = (rightButtons & ovrButton_GripTrigger) != 0;
+		bool aPressed = (rightButtons & ovrButton_A) != 0;
+		bool combo = leftGrip && rightGrip && aPressed;
+		if (combo && !prevStereoCombo) {
+			g_Config.bEnableStereo = !g_Config.bEnableStereo;
+		}
+		prevStereoCombo = combo;
+	}
+
 	//buttons
 	KeyInput keyInput = {};
 	for (int j = 0; j < 2; j++) {
