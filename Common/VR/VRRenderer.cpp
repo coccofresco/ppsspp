@@ -397,6 +397,7 @@ void VR_FinishFrame( engine_t* engine ) {
 
 	int vrMode = vrConfig[VR_CONFIG_MODE];
 	XrCompositionLayerProjectionView projection_layer_elements[2] = {};
+	XrCompositionLayerDepthInfoKHR depth_infos[2] = {};
 	bool headTracking = (vrMode == VR_MODE_MONO_6DOF) || (vrMode == VR_MODE_SBS_6DOF) || (vrMode == VR_MODE_STEREO_6DOF);
 	bool reprojection = vrConfig[VR_CONFIG_REPROJECTION];
 	if (headTracking && reprojection) {
@@ -415,7 +416,7 @@ void VR_FinishFrame( engine_t* engine ) {
 			memset(&projection_layer_elements[eye], 0, sizeof(XrCompositionLayerProjectionView));
 			projection_layer_elements[eye].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
 			projection_layer_elements[eye].pose = pose;
-			projection_layer_elements[eye].fov = fov;
+			projection_layer_elements[eye].fov = projections[eye].fov;
 
 			memset(&projection_layer_elements[eye].subImage, 0, sizeof(XrSwapchainSubImage));
 			projection_layer_elements[eye].subImage.swapchain = frameBuffer->ColorSwapChain.Handle;
@@ -430,6 +431,22 @@ void VR_FinishFrame( engine_t* engine ) {
 				if (eye == 1) {
 					projection_layer_elements[eye].subImage.imageRect.offset.x += frameBuffer->ColorSwapChain.Width / 2;
 				}
+			}
+
+			// Chain depth info to projection view when depth swapchain is available
+			if (frameBuffer->HasDepthSwapchain) {
+				depth_infos[eye].type = XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR;
+				depth_infos[eye].next = NULL;
+				depth_infos[eye].subImage.swapchain = frameBuffer->DepthSwapChain.Handle;
+				depth_infos[eye].subImage.imageRect.offset = {0, 0};
+				depth_infos[eye].subImage.imageRect.extent.width = frameBuffer->DepthSwapChain.Width;
+				depth_infos[eye].subImage.imageRect.extent.height = frameBuffer->DepthSwapChain.Height;
+				depth_infos[eye].subImage.imageArrayIndex = 0;
+				depth_infos[eye].minDepth = 0.0f;
+				depth_infos[eye].maxDepth = 1.0f;
+				depth_infos[eye].nearZ = 0.01f;
+				depth_infos[eye].farZ = 100.0f;
+				projection_layer_elements[eye].next = &depth_infos[eye];
 			}
 		}
 
