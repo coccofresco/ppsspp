@@ -633,7 +633,9 @@ bool StartVRRender() {
 		bool vrStereo = !PSP_CoreParameter().compat.vrCompat().ForceMono && g_Config.bEnableStereo;
 		if (!IsBigScreenVRMode() && (appMode == VR_GAME_MODE)) {
 			VR_SetConfig(VR_CONFIG_MODE, vrStereo ? VR_MODE_STEREO_6DOF : VR_MODE_MONO_6DOF);
-			VR_SetConfig(VR_CONFIG_REPROJECTION, IsImmersiveVRMode() ? 0 : 1);
+			// Stereo NEEDS projection layers (reprojection=1) for per-eye rendering.
+			// Non-stereo immersive uses quad layers (reprojection=0) for wide-FOV.
+			VR_SetConfig(VR_CONFIG_REPROJECTION, vrStereo ? 1 : (IsImmersiveVRMode() ? 0 : 1));
 			vrFlatGame = false;
 		} else if (appMode == VR_GAME_MODE) {
 			VR_SetConfig(VR_CONFIG_MODE, vrStereo ? VR_MODE_STEREO_SCREEN : VR_MODE_MONO_SCREEN);

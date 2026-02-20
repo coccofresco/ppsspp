@@ -278,13 +278,11 @@ void ovrFramebuffer_Acquire(ovrFramebuffer* frameBuffer) {
 		xrAcquireSwapchainImage(frameBuffer->DepthSwapChain.Handle, &depthAcquireInfo, &depthIndex);
 		XrSwapchainImageWaitInfo depthWaitInfo = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO, NULL, XR_INFINITE_DURATION};
 		xrWaitSwapchainImage(frameBuffer->DepthSwapChain.Handle, &depthWaitInfo);
-
-#if XR_USE_GRAPHICS_API_OPENGL_ES || XR_USE_GRAPHICS_API_OPENGL
-		// Bind depth swapchain texture as FBO depth attachment so game rendering writes into it
-		GLuint depthTexture = ((XR_GL_IMAGE*)frameBuffer->DepthSwapChainImage)[depthIndex].image;
-		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, frameBuffer->GLFrameBuffers[frameBuffer->TextureSwapChainIndex]);
-		glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthTexture, 0);
-#endif
+		// NOTE: Do NOT attach depth swapchain texture as GL_DEPTH_ATTACHMENT here.
+		// The FBO uses a packed GL_DEPTH24_STENCIL8 renderbuffer for both depth and stencil.
+		// Replacing GL_DEPTH_ATTACHMENT with a depth-only texture makes the FBO incomplete
+		// (stencil still references the packed renderbuffer, violating GL spec).
+		// Depth data is acquired/released for the OpenXR lifecycle but not used for composition.
 	}
 
 	ovrFramebuffer_SetCurrent(frameBuffer);
