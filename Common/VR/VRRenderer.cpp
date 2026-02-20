@@ -501,82 +501,36 @@ void VR_FinishFrame( engine_t* engine ) {
 			engine->appState.Layers[engine->appState.LayerCount++].Cylinder = cylinder_layer;
 		}
 #else
-		// Check if depth submission is available
-		bool depthAvailable = VR_GetPlatformFlag(VR_PLATFORM_EXTENSION_DEPTH)
-			&& engine->appState.Renderer.FrameBuffer[0].HasDepthSwapchain;
-		VR_SetConfig(VR_CONFIG_DEPTH_SUBMIT, depthAvailable ? 1 : 0);
-
-		if (depthAvailable) {
-			// Projection layer path: cinema as content in projection views with depth
-			for (int eye = 0; eye < ovrMaxNumEyes; eye++) {
-				ovrFramebuffer* frameBuffer = &engine->appState.Renderer.FrameBuffer[0];
-
-				memset(&projection_layer_elements[eye], 0, sizeof(XrCompositionLayerProjectionView));
-				projection_layer_elements[eye].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
-				projection_layer_elements[eye].pose = invViewTransform[eye];
-				projection_layer_elements[eye].fov = projections[eye].fov;
-
-				memset(&projection_layer_elements[eye].subImage, 0, sizeof(XrSwapchainSubImage));
-				projection_layer_elements[eye].subImage.swapchain = frameBuffer->ColorSwapChain.Handle;
-				projection_layer_elements[eye].subImage.imageRect.offset.x = 0;
-				projection_layer_elements[eye].subImage.imageRect.offset.y = 0;
-				projection_layer_elements[eye].subImage.imageRect.extent.width = frameBuffer->ColorSwapChain.Width;
-				projection_layer_elements[eye].subImage.imageRect.extent.height = frameBuffer->ColorSwapChain.Height;
-				projection_layer_elements[eye].subImage.imageArrayIndex = 0;
-			}
-
-			// Chain depth info onto projection views
-			// Use static storage so the pointers remain valid until xrEndFrame
-			static XrCompositionLayerDepthInfoKHR depthInfo[2] = {};
-			for (int eye = 0; eye < ovrMaxNumEyes; eye++) {
-				ovrFramebuffer* frameBuffer = &engine->appState.Renderer.FrameBuffer[0];
-
-				depthInfo[eye] = {};
-				depthInfo[eye].type = XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR;
-				depthInfo[eye].next = NULL;
-				depthInfo[eye].subImage.swapchain = frameBuffer->DepthSwapChain.Handle;
-				depthInfo[eye].subImage.imageRect.offset = {0, 0};
-				depthInfo[eye].subImage.imageRect.extent.width = frameBuffer->DepthSwapChain.Width;
-				depthInfo[eye].subImage.imageRect.extent.height = frameBuffer->DepthSwapChain.Height;
-				depthInfo[eye].subImage.imageArrayIndex = 0;
-				depthInfo[eye].minDepth = 0.0f;
-				depthInfo[eye].maxDepth = 1.0f;
-				depthInfo[eye].nearZ = 0.01f;
-				depthInfo[eye].farZ = 100.0f;
-
-				// Chain onto projection view
-				projection_layer_elements[eye].next = &depthInfo[eye];
-			}
-
-			XrCompositionLayerProjection projection_layer = {};
-			projection_layer.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION;
-			projection_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
-			projection_layer.space = engine->appState.CurrentSpace;
-			projection_layer.viewCount = ovrMaxNumEyes;
-			projection_layer.views = projection_layer_elements;
-
-			engine->appState.Layers[engine->appState.LayerCount++].Projection = projection_layer;
-		} else {
-			// Quad layer fallback: used when depth extension unavailable (e.g. SteamVR OpenGL)
+		VR_SetConfig(VR_CONFIG_DEPTH_SUBMIT, 0);
+		{
 			float aspect = VR_GetConfigFloat(VR_CONFIG_CANVAS_ASPECT);
-			bool antiFlickering = vrConfig[VR_CONFIG_ANTI_FLICKERING] != 0;
-			if (antiFlickering || (headTracking && !reprojection)) {
-				// Game rendered at 2x width (M[0] halved), so display aspect doubles.
-				// For PSP native 480:272 = 1.765:1, doubled = 3.53:1
-				aspect *= 2.0f;
-			}
+			float screenWidth, screenHeight;
 
-			// Screen size driven by fCanvasDistance and fFieldOfViewPercentage.
-			// fFieldOfViewPercentage (100-200) scales the screen's angular size:
-			// at 100% the screen subtends ~44 deg; at 200% it doubles.
-			// This single control satisfies both CINE-03 (screen size) and CINE-04 (FOV scale).
-			float fovScale = VR_GetConfigFloat(VR_CONFIG_FOV_SCALE);
-			if (fovScale < 1.0f) fovScale = 1.0f;
-			float absDistance = fabs(distance);
-			if (absDistance < 0.5f) absDistance = 0.5f;
-			float baseWidth = absDistance * 0.8f;  // subtends ~44 deg at scale 1.0
-			float screenWidth = baseWidth * fovScale;
-			float screenHeight = screenWidth / aspect;
+			if (headTracking && !reprojection) {
+				// Immersive mode: wide-FOV game content on a large world-locked quad.
+				// Approximates Quest's cylinder layer (radius=2.0, centralAngle=PI).
+				// Game renders at 2x horizontal FOV (M[0] halved), so aspect doubles.
+				aspect *= 2.0f;
+				float immersiveDist = 2.0f;
+				pos = {-sinf(menuYaw) * immersiveDist, 0, -cosf(menuYaw) * immersiveDist};
+				if (!VR_GetConfig(VR_CONFIG_CANVAS_6DOF)) {
+					pos.x += invViewTransform[0].position.x;
+					pos.y += invViewTransform[0].position.y;
+					pos.z += invViewTransform[0].position.z;
+				}
+				// Quad subtends ~120 deg horizontal (2*60), covering typical HMD FOV
+				screenWidth = 2.0f * immersiveDist * tanf(60.0f * (float)M_PI / 180.0f);
+				screenHeight = screenWidth / aspect;
+			} else {
+				// Cinema mode: floating screen at configurable distance
+				float fovScale = VR_GetConfigFloat(VR_CONFIG_FOV_SCALE);
+				if (fovScale < 1.0f) fovScale = 1.0f;
+				float absDistance = fabs(distance);
+				if (absDistance < 0.5f) absDistance = 0.5f;
+				float baseWidth = absDistance * 0.8f;
+				screenWidth = baseWidth * fovScale;
+				screenHeight = screenWidth / aspect;
+			}
 			if (screenHeight < 0.1f) screenHeight = 0.1f;
 
 			XrCompositionLayerQuad quad_layer = {};
