@@ -151,3 +151,7 @@ RAPrefs_PPSSPP.cfg
 cmake-build-*/
 
 /.vscode/
+
+# Local development artifacts (never push)
+.planning/
+.claude/

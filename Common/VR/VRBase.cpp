@@ -51,9 +51,7 @@ void VR_Init( void* system, const char* name, int version ) {
 #elif defined(XR_USE_GRAPHICS_API_OPENGL_ES)
 	extensions.push_back(XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME);
 #endif
-#ifdef ANDROID
-	extensions.push_back(XR_KHR_COMPOSITION_LAYER_CYLINDER_EXTENSION_NAME);
-#endif
+// Cylinder extension pushed conditionally below after enumeration
 #ifdef ANDROID
 	if (VR_GetPlatformFlag(VR_PLATFORM_EXTENSION_INSTANCE)) {
 		extensions.push_back(XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME);
@@ -67,7 +65,7 @@ void VR_Init( void* system, const char* name, int version ) {
 	}
 #endif
 
-	// Check for depth composition layer extension (all platforms)
+	// Check for optional composition layer extensions (all platforms)
 	{
 		uint32_t extCount = 0;
 		xrEnumerateInstanceExtensionProperties(nullptr, 0, &extCount, nullptr);
@@ -83,7 +81,11 @@ void VR_Init( void* system, const char* name, int version ) {
 					extensions.push_back(XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME);
 					VR_SetPlatformFLag(VR_PLATFORM_EXTENSION_DEPTH, true);
 					VRLog("[VR_Init] Depth composition layer extension available and enabled");
-					break;
+				}
+				if (strcmp(ext.extensionName, XR_KHR_COMPOSITION_LAYER_CYLINDER_EXTENSION_NAME) == 0) {
+					extensions.push_back(XR_KHR_COMPOSITION_LAYER_CYLINDER_EXTENSION_NAME);
+					VR_SetPlatformFLag(VR_PLATFORM_EXTENSION_CYLINDER, true);
+					VRLog("[VR_Init] Cylinder composition layer extension available and enabled");
 				}
 			}
 		}

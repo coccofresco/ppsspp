@@ -122,7 +122,6 @@ public:
 
 	void Draw(UIContext &dc) override {
 		UI::Style style = dc.GetTheme().itemStyle;
-		SetTextColor(style.fgColor);  // bit hacky but works
 		dc.FillRect(style.background, bounds_);
 		UI::TextView::Draw(dc);
 	}
@@ -304,9 +303,6 @@ void GameSettingsScreen::CreateTabs() {
 	}
 }
 
-// TODO: Make this generic
-extern int DefaultDepthRaster();
-
 // Graphics
 void GameSettingsScreen::CreateGraphicsSettings(UI::ViewGroup *graphicsSettings) {
 	auto gr = GetI18NCategory(I18NCat::GRAPHICS);
@@ -438,6 +434,14 @@ void GameSettingsScreen::CreateGraphicsSettings(UI::ViewGroup *graphicsSettings)
 			});
 		}
 #endif
+
+#if PPSSPP_PLATFORM(ANDROID)
+		// Hide Immersive Mode on pre-kitkat Android
+		if (System_GetPropertyInt(SYSPROP_SYSTEMVERSION) >= 19) {
+			// Let's reuse the Fullscreen translation string from desktop.
+			graphicsSettings->Add(new CheckBox(&config.bImmersiveMode, sy->T("Hide navigation bar")))->OnClick.Handle(this, &GameSettingsScreen::OnImmersiveModeChange);
+		}
+#endif
 		// Display Layout Editor: To avoid overlapping touch controls on large tablets, meet geeky demands for integer zoom/unstretched image etc.
 		Choice *displayEditor = graphicsSettings->Add(new Choice(gr->T("Display layout & effects")));
 		displayEditor->OnClick.Add([&](UI::EventParams &) -> void {
@@ -510,18 +514,16 @@ void GameSettingsScreen::CreateGraphicsSettings(UI::ViewGroup *graphicsSettings)
 	CheckBox *disableCulling = graphicsSettings->Add(new CheckBox(&g_Config.bDisableRangeCulling, gr->T("Disable culling")));
 	disableCulling->SetDisabledPtr(&g_Config.bSoftwareRendering);
 
-	static const char *skipGpuReadbackModes[] = { "No", "Skip", "Copy to texture" };
+	static const char *skipGpuReadbackModes[] = { "No (default)", "Skip", "Copy to texture" };
 
 	PopupMultiChoice *skipGPUReadbacks = graphicsSettings->Add(new PopupMultiChoice(&g_Config.iSkipGPUReadbackMode, gr->T("Skip GPU Readbacks"), skipGpuReadbackModes, 0, ARRAY_SIZE(skipGpuReadbackModes), I18NCat::GRAPHICS, screenManager()));
 	skipGPUReadbacks->SetDisabledPtr(&g_Config.bSoftwareRendering);
-	skipGPUReadbacks->SetDefault(0);
 
-	static const char *depthRasterModes[] = { "Auto", "Low", "Off", "Always on" };
+	static const char *depthRasterModes[] = { "Auto (default)", "Low", "Off", "Always on" };
 
 	PopupMultiChoice *depthRasterMode = graphicsSettings->Add(new PopupMultiChoice(&g_Config.iDepthRasterMode, gr->T("Lens flare occlusion"), depthRasterModes, 0, ARRAY_SIZE(depthRasterModes), I18NCat::GRAPHICS, screenManager()));
 	depthRasterMode->SetDisabledPtr(&g_Config.bSoftwareRendering);
 	depthRasterMode->SetChoiceIcon(3, ImageID("I_WARNING"));  // It's a performance trap.
-	depthRasterMode->SetDefault(DefaultDepthRaster());
 	if (g_Config.iDepthRasterMode != 3)
 		depthRasterMode->HideChoice(3);
 
@@ -530,16 +532,8 @@ void GameSettingsScreen::CreateGraphicsSettings(UI::ViewGroup *graphicsSettings)
 	graphicsSettings->Add(new SettingHint(gr->T("Lazy texture caching Tip", "Faster, but can cause text problems in a few games")));
 
 	static const char *quality[] = { "Low", "Medium", "High" };
-	PopupMultiChoice *bezierQuality = graphicsSettings->Add(new PopupMultiChoice(&g_Config.iSplineBezierQuality, gr->T("LowCurves", "Spline/Bezier curves quality"), quality, 0, ARRAY_SIZE(quality), I18NCat::GRAPHICS, screenManager()));
-	bezierQuality->SetDefault(2);
+	graphicsSettings->Add(new PopupMultiChoice(&g_Config.iSplineBezierQuality, gr->T("LowCurves", "Spline/Bezier curves quality"), quality, 0, ARRAY_SIZE(quality), I18NCat::GRAPHICS, screenManager()));
 	graphicsSettings->Add(new SettingHint(gr->T("LowCurves Tip", "Only used by some games, controls smoothness of curves")));
-
-	static const char *bloomHackOptions[] = {"Off", "Safe", "Balanced", "Aggressive"};
-	PopupMultiChoice *bloomHack = graphicsSettings->Add(new PopupMultiChoice(&g_Config.iBloomHack, gr->T("Lower resolution for effects"), bloomHackOptions, 0, ARRAY_SIZE(bloomHackOptions), I18NCat::GRAPHICS, screenManager()));
-	bloomHack->SetEnabledFunc([] {
-		return !g_Config.bSoftwareRendering && g_Config.iInternalResolution != 1;
-	});
-	graphicsSettings->Add(new SettingHint(gr->T("Reduces artifacts")));
 
 	graphicsSettings->Add(new ItemHeader(gr->T("Performance")));
 	CheckBox *frameDuplication = graphicsSettings->Add(new CheckBox(&g_Config.bRenderDuplicateFrames, gr->T("Render duplicate frames to 60hz")));
@@ -550,9 +544,8 @@ void GameSettingsScreen::CreateGraphicsSettings(UI::ViewGroup *graphicsSettings)
 
 	if (draw->GetDeviceCaps().setMaxFrameLatencySupported) {
 		static const char *bufferOptions[] = { "No buffer", "Up to 1", "Up to 2" };
-		PopupMultiChoice *inflightChoice = graphicsSettings->Add(new PopupMultiChoice(&g_Config.iInflightFrames, gr->T("Buffer graphics commands"), bufferOptions, 1, ARRAY_SIZE(bufferOptions), I18NCat::GRAPHICS, screenManager()));
+		PopupMultiChoice *inflightChoice = graphicsSettings->Add(new PopupMultiChoice(&g_Config.iInflightFrames, gr->T("Buffer graphics commands (faster, input lag)"), bufferOptions, 1, ARRAY_SIZE(bufferOptions), I18NCat::GRAPHICS, screenManager()));
 		inflightChoice->OnChoice.Handle(this, &GameSettingsScreen::OnInflightFramesChoice);
-		graphicsSettings->Add(new SettingHint(gr->T("Faster, input lag")));  // TODO: This hint could use improvement.
 	}
 
 	if (GetGPUBackend() == GPUBackend::VULKAN) {
@@ -657,6 +650,24 @@ void GameSettingsScreen::CreateGraphicsSettings(UI::ViewGroup *graphicsSettings)
 		PopupSliderChoice *cardboardYShift = graphicsSettings->Add(new PopupSliderChoice(&config.iCardboardYShift, -100, 100, 0, gr->T("Cardboard Screen Y Shift", "Y Shift (in % of the void)"), 1, screenManager(), gr->T("% of the void")));
 		cardboardYShift->SetEnabledPtr(&config.bEnableCardboardVR);
 	}
+
+	std::vector<std::string> cameraList = Camera::getDeviceList();
+	if (cameraList.size() >= 1) {
+		graphicsSettings->Add(new ItemHeader(gr->T("Camera")));
+		PopupMultiChoiceDynamic *cameraChoice = graphicsSettings->Add(new PopupMultiChoiceDynamic(&g_Config.sCameraDevice, gr->T("Camera Device"), cameraList, I18NCat::NONE, screenManager()));
+		cameraChoice->OnChoice.Handle(this, &GameSettingsScreen::OnCameraDeviceChange);
+#if PPSSPP_PLATFORM(WINDOWS) && !PPSSPP_PLATFORM(UWP)
+		graphicsSettings->Add(new CheckBox(&g_Config.bCameraMirrorHorizontal, gr->T("Mirror camera image")));
+#endif
+	}
+
+	graphicsSettings->Add(new ItemHeader(gr->T("Hack Settings", "Hack Settings (these WILL cause glitches)")));
+
+	static const char *bloomHackOptions[] = { "Off", "Safe", "Balanced", "Aggressive" };
+	PopupMultiChoice *bloomHack = graphicsSettings->Add(new PopupMultiChoice(&g_Config.iBloomHack, gr->T("Lower resolution for effects (reduces artifacts)"), bloomHackOptions, 0, ARRAY_SIZE(bloomHackOptions), I18NCat::GRAPHICS, screenManager()));
+	bloomHack->SetEnabledFunc([] {
+		return !g_Config.bSoftwareRendering && g_Config.iInternalResolution != 1;
+	});
 
 	graphicsSettings->Add(new ItemHeader(gr->T("Overlay Information")));
 	graphicsSettings->Add(new BitCheckBox(&g_Config.iShowStatusFlags, (int)ShowStatusFlags::FPS_COUNTER, gr->T("Show FPS Counter")));
@@ -910,9 +921,8 @@ void GameSettingsScreen::CreateControlsSettings(UI::ViewGroup *controlsSettings)
 		hideStickBackground->SetEnabledPtr(&g_Config.bShowTouchControls);
 
 		// Sticky D-pad.
-		CheckBox *stickyDpad = controlsSettings->Add(new CheckBox(&g_Config.bStickyTouchDPad, co->T("Sticky D-Pad")));
+		CheckBox *stickyDpad = controlsSettings->Add(new CheckBox(&g_Config.bStickyTouchDPad, co->T("Sticky D-Pad (easier sweeping movements)")));
 		stickyDpad->SetEnabledPtr(&g_Config.bShowTouchControls);
-		controlsSettings->Add(new SettingHint(co->T("Easier sweeping movements")));
 
 		// Re-centers itself to the touch location on touch-down.
 		CheckBox *floatingAnalog = controlsSettings->Add(new CheckBox(&g_Config.bAutoCenterTouchAnalog, co->T("Auto-centering analog stick")));
@@ -1038,22 +1048,13 @@ void GameSettingsScreen::CreateNetworkingSettings(UI::ViewGroup *networkingSetti
 	}
 
 	networkingSettings->Add(new ItemHeader(n->T("Ad Hoc multiplayer")));
-
-	static const char *relayModes[] = {"Auto", "Yes", "No"};
-	PopupMultiChoice *relayModePopup = networkingSettings->Add(new PopupMultiChoice(&g_Config.iAdhocServerRelayMode, n->T("Try to use server-provided packet relay"), relayModes, 0, ARRAY_SIZE(relayModes), I18NCat::DIALOG, screenManager()));
-	relayModePopup->SetEnabled(!PSP_IsInited());
+	networkingSettings->Add(new CheckBox(&g_Config.bUseServerRelay, n->T("Try to use server-provided packet relay")))->SetEnabled(!PSP_IsInited());
 	networkingSettings->Add(new SettingHint(n->T("PacketRelayHint", "Available on servers that provide 'aemu_postoffice' packet relay, like socom.cc. Disable this for LAN or VPN play. Can be more reliable, but sometimes slower.")));
 
 	networkingSettings->Add(new ItemHeader(n->T("Ad Hoc server")));
 	networkingSettings->Add(new CheckBox(&g_Config.bEnableAdhocServer, n->T("Enable built-in PRO Adhoc Server", "Enable built-in PRO Adhoc Server")));
 	networkingSettings->Add(new ChoiceWithValueDisplay(&g_Config.sProAdhocServer, n->T("Change proAdhocServer Address"), I18NCat::NONE))->OnClick.Add([=](UI::EventParams &) {
-		auto list_to_use = defaultProAdhocServerList;
-		downloadedProAdhocServerListMutex.lock();
-		if (downloadedProAdhocServerList.size() != 0) {
-			list_to_use = downloadedProAdhocServerList;
-		}
-		downloadedProAdhocServerListMutex.unlock();
-		screenManager()->push(new HostnameSelectScreen(&g_Config.sProAdhocServer, list_to_use, n->T("proAdhocServer Address:")));
+		screenManager()->push(new HostnameSelectScreen(&g_Config.sProAdhocServer, &g_Config.proAdhocServerList, n->T("proAdhocServer Address:")));
 	});
 	networkingSettings->Add(new SettingHint(n->T("Change proAdhocServer address hint")));
 
@@ -1209,15 +1210,6 @@ void GameSettingsScreen::CreateSystemSettings(UI::ViewGroup *systemSettings) {
 	switchMode->OnChoice.Add([](EventParams &e) {
 		System_Notify(SystemNotification::APP_SWITCH_MODE_CHANGED);
 	});
-#endif
-
-#if PPSSPP_PLATFORM(ANDROID)
-	// Hide Immersive Mode on pre-kitkat Android
-	if (System_GetPropertyInt(SYSPROP_SYSTEMVERSION) >= 19) {
-		DisplayLayoutConfig &config = g_Config.GetDisplayLayoutConfig(GetDeviceOrientation());
-		// Let's reuse the Fullscreen translation string from desktop.
-		systemSettings->Add(new CheckBox(&config.bImmersiveMode, sy->T("Hide navigation bar")))->OnClick.Handle(this, &GameSettingsScreen::OnImmersiveModeChange);
-	}
 #endif
 
 	PopupSliderChoice *uiScale = systemSettings->Add(new PopupSliderChoice(&g_Config.iUIScaleFactor, -8, 8, 0, sy->T("UI size adjustment (DPI)"), screenManager()));
@@ -1453,17 +1445,6 @@ void GameSettingsScreen::CreateSystemSettings(UI::ViewGroup *systemSettings) {
 	systemSettings->Add(new CheckBox(&g_Config.bPauseOnLostFocus, sy->T("Pause when not focused")));
 #endif
 
-	auto gr = GetI18NCategory(I18NCat::GRAPHICS);
-	std::vector<std::string> cameraList = Camera::getDeviceList();
-	if (cameraList.size() >= 1) {
-		systemSettings->Add(new ItemHeader(gr->T("Camera")));
-		PopupMultiChoiceDynamic *cameraChoice = systemSettings->Add(new PopupMultiChoiceDynamic(&g_Config.sCameraDevice, gr->T("Camera Device"), cameraList, I18NCat::NONE, screenManager()));
-		cameraChoice->OnChoice.Handle(this, &GameSettingsScreen::OnCameraDeviceChange);
-#if PPSSPP_PLATFORM(WINDOWS) && !PPSSPP_PLATFORM(UWP)
-		systemSettings->Add(new CheckBox(&g_Config.bCameraMirrorHorizontal, gr->T("Mirror camera image")));
-#endif
-	}
-
 	systemSettings->Add(new ItemHeader(sy->T("Cheats", "Cheats")));
 	systemSettings->Add(new CheckBox(&g_Config.bEnableCheats, sy->T("Enable Cheats")));
 	systemSettings->Add(new CheckBox(&g_Config.bEnablePlugins, sy->T("Enable plugins")));
@@ -1524,7 +1505,7 @@ void GameSettingsScreen::CreateVRSettings(UI::ViewGroup *vrSettings) {
 	vrSettings->Add(new ItemHeader(vr->T("Stereoscopic 3D")));
 	vrSettings->Add(new CheckBox(&g_Config.bEnableStereo, vr->T("Stereoscopic 3D")));
 	PopupSliderChoiceFloat *intensitySlider = vrSettings->Add(
-		new PopupSliderChoiceFloat(&g_Config.fStereoIntensity, 0.0f, 150.0f, 70.0f,
+		new PopupSliderChoiceFloat(&g_Config.fStereoIntensity, 0.0f, 500.0f, 70.0f,
 			vr->T("3D Intensity"), 5.0f, screenManager(), "%"));
 	intensitySlider->SetEnabledPtr(&g_Config.bEnableStereo);
 
@@ -1689,11 +1670,6 @@ void GameSettingsScreen::OnChangeBackground(UI::EventParams &e) {
 }
 
 void GameSettingsScreen::dialogFinished(const Screen *dialog, DialogResult result) {
-	if (equals(dialog->tag(), "NewLanguage") && result == DR_OK) {
-		screenManager()->RecreateAllViews();
-		return;
-	}
-
 	bool recreate = false;
 	if (result == DialogResult::DR_OK) {
 		g_Config.iFpsLimit1 = iAlternateSpeedPercent1_ < 0 ? -1 : (iAlternateSpeedPercent1_ * 60) / 100;
@@ -1912,10 +1888,9 @@ void HostnameSelectScreen::CreatePopupContents(UI::ViewGroup *parent) {
 	buttonsRow2->Add(new Spacer(new LinearLayoutParams(1.0, Gravity::G_RIGHT)));
 
 	std::vector<std::string> listIP;
-	for (const auto &item : listItems_) {
-		listIP.push_back(item.hostname);
+	if (listItems_) {
+		listIP = *listItems_;
 	}
-
 	// Add non-editable items
 	listIP.push_back("localhost");
 	net::GetLocalIP4List(listIP);
@@ -2122,7 +2097,7 @@ void GestureMappingScreen::CreateGestureTab(UI::LinearLayout *vert, int zoneInde
 }
 
 RestoreSettingsScreen::RestoreSettingsScreen(std::string_view title)
-	: PopupScreen(title, T(I18NCat::DIALOG, "OK"), T(I18NCat::DIALOG, "Cancel")) {}
+	: PopupScreen(title, "OK", "Cancel") {}
 
 void RestoreSettingsScreen::CreatePopupContents(UI::ViewGroup *parent) {
 	using namespace UI;
