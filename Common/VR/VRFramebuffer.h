@@ -13,3 +13,4 @@ void* ovrFramebuffer_SetCurrent(ovrFramebuffer* frameBuffer);
 void ovrRenderer_Create(XrSession session, ovrRenderer* renderer, int width, int height);
 void ovrRenderer_Destroy(ovrRenderer* renderer);
 void ovrRenderer_MouseCursor(ovrRenderer* renderer, int x, int y, int sx, int sy);
+void ovrRenderer_StereoDebugWatermark(int fboIndex);

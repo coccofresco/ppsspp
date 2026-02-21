@@ -381,6 +381,22 @@ void VR_EndFrame( engine_t* engine ) {
 		ovrRenderer_MouseCursor(&engine->appState.Renderer, x, y, sx, sy);
 	}
 
+	// Stereo debug watermark: RED=FBO0, BLUE=FBO1
+	// If LEFT eye sees RED → FBO mapping OK, issue is IPD sign
+	// If LEFT eye sees BLUE → FBO mapping swapped
+	{
+		static int wmLogCount = 0;
+		if (wmLogCount < 10) {
+			char buf[256];
+			snprintf(buf, sizeof(buf),
+				"[VR-WATERMARK] vrMode=%d fboIndex=%d STEREO_6DOF=%d passes=%d",
+				vrMode, fboIndex, VR_MODE_STEREO_6DOF, vrConfig[VR_CONFIG_REPROJECTION]);
+			VRLog(buf);
+			wmLogCount++;
+		}
+		ovrRenderer_StereoDebugWatermark(fboIndex);
+	}
+
 	ovrFramebuffer_Release(&engine->appState.Renderer.FrameBuffer[fboIndex]);
 }
 
@@ -435,6 +451,23 @@ void VR_FinishFrame( engine_t* engine ) {
 			}
 
 			// Depth info chaining disabled: depth swapchain not populated during rendering
+		}
+
+		// Stage 4 debug: confirm submission eye→FBO→pose mapping
+		static int submitLogCount = 0;
+		if (submitLogCount < 30 && vrMode == VR_MODE_STEREO_6DOF) {
+			for (int e = 0; e < ovrMaxNumEyes; e++) {
+				char buf[256];
+				snprintf(buf, sizeof(buf),
+					"[VR-STEREO-S4] submit eye=%d swapchain=%p pose.x=%.6f fov.L=%.2f fov.R=%.2f",
+					e,
+					(void*)projection_layer_elements[e].subImage.swapchain,
+					projection_layer_elements[e].pose.position.x,
+					projection_layer_elements[e].fov.angleLeft,
+					projection_layer_elements[e].fov.angleRight);
+				VRLog(buf);
+			}
+			submitLogCount++;
 		}
 
 		XrCompositionLayerProjection projection_layer = {};
@@ -512,9 +545,11 @@ void VR_FinishFrame( engine_t* engine ) {
 
 			if (headTracking && !reprojection) {
 				// Immersive mode: wide-FOV game content on a large world-locked quad.
-				// Approximates Quest's cylinder layer (radius=2.0, centralAngle=PI).
-				// Game renders at 2x horizontal FOV (M[0] halved), so aspect doubles.
-				aspect *= 2.0f;
+				// Use FBO dimensions for aspect (matching Quest's cylinder layer approach).
+				// Game renders at 2x horizontal FOV (M[0] halved), so FBO aspect doubles.
+				float fboW = (float)engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Width;
+				float fboH = (float)engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Height;
+				aspect = 2.0f * fboW / fboH;
 				float immersiveDist = 2.0f;
 				pos = {-sinf(menuYaw) * immersiveDist, 0, -cosf(menuYaw) * immersiveDist};
 				if (!VR_GetConfig(VR_CONFIG_CANVAS_6DOF)) {

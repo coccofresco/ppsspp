@@ -166,6 +166,8 @@ void InitVROnWindows(HDC hDC, HGLRC hGLRC) {
 		VRLog("[VR] VR init failed: no Instance. Continuing as non-VR.");
 		return;
 	}
+	// Enable VR settings tab on Windows (device type is DESKTOP, not VR)
+	g_Config.bForceVR = true;
 	VRLog("[VR] Instance OK, calling VR_EnterVR...");
 
 	VR_EnterVR(engine, hDC, hGLRC);
@@ -935,27 +937,45 @@ void UpdateVRViewMatrices() {
 		M[11] += side.z;
 	}
 
-	for (int matrix = VR_VIEW_MATRIX_LEFT_EYE; matrix <= VR_VIEW_MATRIX_RIGHT_EYE; matrix++) {
+	// Save base view matrix before per-eye stereo offsets
+	float M_base[16];
+	memcpy(M_base, M, sizeof(float) * 16);
 
-		// Stereoscopy
+	for (int matrix = VR_VIEW_MATRIX_LEFT_EYE; matrix <= VR_VIEW_MATRIX_RIGHT_EYE; matrix++) {
+		// Reset to base each iteration (non-cumulative per-eye offset)
+		memcpy(M, M_base, sizeof(float) * 16);
+
+		// Stereoscopy: use OpenXR per-eye positions directly.
+		// M_base has vrView[0] (left eye) position baked in via 6DoF code above.
+		// For each eye, apply the world-space delta from vrView[0] to vrView[eyeIndex].
+		// This avoids sign/rotation ambiguity — the runtime provides correct per-eye poses.
 		bool vrStereo = !PSP_CoreParameter().compat.vrCompat().ForceMono && g_Config.bEnableStereo;
 		if (vrStereo && IsVREnabled()) {
-			bool mirrored = vrMirroring[VR_MIRRORING_AXIS_Z] ^ (matrix == VR_VIEW_MATRIX_RIGHT_EYE);
-			float dx = fabs(vrView[1].pose.position.x - vrView[0].pose.position.x);
-			float dy = fabs(vrView[1].pose.position.y - vrView[0].pose.position.y);
-			float dz = fabs(vrView[1].pose.position.z - vrView[0].pose.position.z);
-			float ipd = sqrt(dx * dx + dy * dy + dz * dz);
+			int eyeIndex = matrix - VR_VIEW_MATRIX_LEFT_EYE; // 0=left, 1=right
 
-			// Apply stereo intensity: 0% = flat, 100% = natural headset IPD, >100% = exaggerated
+			// Intensity: 0% = flat (no offset), 100% = natural IPD, >100% = exaggerated
 			float intensity = g_Config.fStereoIntensity / 100.0f;
-			ipd *= intensity;
 
-			XrVector3f separation = {ipd * scale * 0.5f, 0.0f, 0.0f};
-			separation = XrQuaternionf_Rotate(invView.orientation, separation);
-			separation = XrVector3f_ScalarMultiply(separation, mirrored ? -1.0f : 2.0f);
-			M[3] += separation.x;
-			M[7] += separation.y;
-			M[11] += separation.z;
+			// Delta from left eye to this eye (world-space), scaled by intensity
+			float dx = (vrView[eyeIndex].pose.position.x - vrView[0].pose.position.x) * intensity;
+			float dy = (vrView[eyeIndex].pose.position.y - vrView[0].pose.position.y) * intensity;
+			float dz = (vrView[eyeIndex].pose.position.z - vrView[0].pose.position.z) * intensity;
+
+			// Apply with same mirroring and convention as 6DoF position (line ~908)
+			M[3] -= dx * (vrMirroring[VR_MIRRORING_AXIS_X] ? -1.0f : 1.0f) * scale;
+			M[7] -= dy * (vrMirroring[VR_MIRRORING_AXIS_Y] ? -1.0f : 1.0f) * scale;
+			M[11] -= dz * (vrMirroring[VR_MIRRORING_AXIS_Z] ? -1.0f : 1.0f) * scale;
+
+			// Stereo debug logging (Stage 1)
+			static int stereoLogCount = 0;
+			if (stereoLogCount < 60) {
+				char buf[256];
+				snprintf(buf, sizeof(buf),
+					"[VR-STEREO] eye=%d dx=%.6f dy=%.6f dz=%.6f M_tx=%.6f intensity=%.0f%%",
+					eyeIndex, dx, dy, dz, M[3], intensity * 100.0f);
+				VRLog(buf);
+				stereoLogCount++;
+			}
 		}
 
 		memcpy(vrMatrix[matrix], M, sizeof(float) * 16);

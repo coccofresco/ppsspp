@@ -1126,6 +1126,19 @@ void GLQueueRunner::PerformRenderPass(const GLRStep &step, bool first, bool last
 				} else {
 					glUniformMatrix4fv(loc, 1, false, c.uniformStereoMatrix4.mData + 16);
 				}
+				// Stage 3 debug: confirm FBO→matrix mapping
+				static int stereoMatLogCount = 0;
+				if (stereoMatLogCount < 30 && c.uniformStereoMatrix4.name) {
+					char buf[256];
+					const float* used = (GetVRFBOIndex() == 0) ? c.uniformStereoMatrix4.mData : c.uniformStereoMatrix4.mData + 16;
+					snprintf(buf, sizeof(buf),
+						"[VR-STEREO-S3] fbo=%d uniform=%s using=%s M_tx=%.6f",
+						GetVRFBOIndex(), c.uniformStereoMatrix4.name,
+						(GetVRFBOIndex() == 0) ? "LEFT[0..15]" : "RIGHT[16..31]",
+						used[3]);
+					VRLog(buf);
+					stereoMatLogCount++;
+				}
 			}
 			if (GetVRFBOIndex() == 1 || GetVRPassesCount() == 1) {
 				// Only delete the data if we're rendering the only or the second eye.
