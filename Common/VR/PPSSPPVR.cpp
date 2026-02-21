@@ -28,6 +28,8 @@
 
 enum VRMatrix {
 	VR_PROJECTION_MATRIX,
+	VR_PROJECTION_MATRIX_LEFT,
+	VR_PROJECTION_MATRIX_RIGHT,
 	VR_VIEW_MATRIX_LEFT_EYE,
 	VR_VIEW_MATRIX_RIGHT_EYE,
 	VR_MATRIX_COUNT
@@ -630,6 +632,26 @@ bool StartVRRender() {
 		}
 		memcpy(vrMatrix[VR_PROJECTION_MATRIX], M, sizeof(float) * 16);
 
+		// Per-eye projection matrices for true stereo rendering.
+		// Each eye uses its own asymmetric FOV from OpenXR, so the rendering
+		// projection matches the submission FOV exactly (no runtime warp).
+		for (int eye = 0; eye < ovrMaxNumEyes; eye++) {
+			float tanL = tanf(vrView[eye].fov.angleLeft);
+			float tanR = tanf(vrView[eye].fov.angleRight);
+			float tanD = tanf(vrView[eye].fov.angleDown);
+			float tanU = tanf(vrView[eye].fov.angleUp);
+			float P[16] = {};
+			P[0] = 2 / (tanR - tanL);
+			P[5] = 2 / (tanU - tanD);
+			P[8] = (tanR + tanL) / (tanR - tanL);
+			P[9] = (tanU + tanD) / (tanU - tanD);
+			P[10] = -1;
+			P[11] = -1;
+			P[14] = -(nearZ + nearZ);
+			int matIdx = (eye == 0) ? VR_PROJECTION_MATRIX_LEFT : VR_PROJECTION_MATRIX_RIGHT;
+			memcpy(vrMatrix[matIdx], P, sizeof(float) * 16);
+		}
+
 		// Decide if the scene is 3D or not
 		VR_SetConfigFloat(VR_CONFIG_CANVAS_ASPECT, 480.0f / 272.0f);
 		bool vrStereo = !PSP_CoreParameter().compat.vrCompat().ForceMono && g_Config.bEnableStereo;
@@ -655,6 +677,8 @@ bool StartVRRender() {
 		// Set customizations
 		VR_SetConfigFloat(VR_CONFIG_CANVAS_DISTANCE, !IsBigScreenVRMode() && (appMode == VR_GAME_MODE) ? g_Config.fCanvas3DDistance : g_Config.fCanvasDistance);
 		VR_SetConfigFloat(VR_CONFIG_FOV_SCALE, g_Config.fFieldOfViewPercentage / 100.0f);
+		VR_SetConfigFloat(VR_CONFIG_STEREO_INTENSITY, g_Config.fStereoIntensity / 100.0f);
+		VR_SetConfig(VR_CONFIG_CANVAS_6DOF, g_Config.bEnable6DoF);
 		VR_SetConfig(VR_CONFIG_PASSTHROUGH, g_Config.bPassthrough && IsPassthroughSupported());
 		return true;
 	}
@@ -696,7 +720,7 @@ bool IsPassthroughSupported() {
 
 bool IsBigScreenVRMode() {
 	bool vrIncompatibleGame = PSP_CoreParameter().compat.vrCompat().ForceFlatScreen;
-	bool vrMode = (g_Config.bEnableVR || IsImmersiveVRMode()) && !vrIncompatibleGame;
+	bool vrMode = (g_Config.bEnableVR && IsImmersiveVRMode()) && !vrIncompatibleGame;
 	bool vrScene = !vrFlatForced && (g_Config.bManualForceVR || (vr3DGeometryCount > 15));
 	return !vrMode || !vrScene;
 }
@@ -809,6 +833,32 @@ void UpdateVRProjection(float* projMatrix, float* output) {
 	output[11] *= g_Config.fFieldOfViewPercentage / 100.0f;
 }
 
+void UpdateVRProjectionStereo(float* projMatrix, float* leftOutput, float* rightOutput) {
+	float* outputs[] = {leftOutput, rightOutput};
+	int matrices[] = {VR_PROJECTION_MATRIX_LEFT, VR_PROJECTION_MATRIX_RIGHT};
+	for (int eye = 0; eye < 2; eye++) {
+		for (int i = 0; i < 16; i++) {
+			if (!IsVREnabled() || IsBigScreenVRMode()) {
+				outputs[eye][i] = projMatrix[i];
+			} else if (i == 8 || i == 9) {
+				// Per-eye frustum asymmetry — always use VR values unconditionally.
+				// M[8] and M[9] encode the off-center shift that distinguishes left
+				// from right eye. The game's projection has these as 0 (symmetric),
+				// but zeroing them would destroy the per-eye difference.
+				outputs[eye][i] = vrMatrix[matrices[eye]][i];
+			} else if (fabs(projMatrix[i]) > 0) {
+				outputs[eye][i] = vrMatrix[matrices[eye]][i];
+				if ((outputs[eye][i] > 0) != (projMatrix[i] > 0)) {
+					outputs[eye][i] *= -1.0f;
+				}
+			} else {
+				outputs[eye][i] = 0;
+			}
+		}
+		outputs[eye][11] *= g_Config.fFieldOfViewPercentage / 100.0f;
+	}
+}
+
 void UpdateVRView(float* leftEye, float* rightEye) {
 	float* dst[] = {leftEye, rightEye};
 	float* matrix[] = {vrMatrix[VR_VIEW_MATRIX_LEFT_EYE], vrMatrix[VR_VIEW_MATRIX_RIGHT_EYE]};
@@ -903,13 +953,8 @@ void UpdateVRViewMatrices() {
 	float M[16];
 	XrQuaternionf_ToMatrix4f(&invView.orientation, M);
 
-	// Apply 6Dof head movement
-	if (g_Config.bEnable6DoF && IsVREnabled()) {
-		M[3] -= vrView[0].pose.position.x * (vrMirroring[VR_MIRRORING_AXIS_X] ? -1.0f : 1.0f) * scale;
-		M[7] -= vrView[0].pose.position.y * (vrMirroring[VR_MIRRORING_AXIS_Y] ? -1.0f : 1.0f) * scale;
-		M[11] -= vrView[0].pose.position.z * (vrMirroring[VR_MIRRORING_AXIS_Z] ? -1.0f : 1.0f) * scale;
-	}
-	// Camera adjust - distance
+	// Camera offsets — these are already in view space (rotated by invView.orientation)
+	// and are the same for both eyes, so compute once before the per-eye loop.
 	if (fabsf(positionOffset.z) > 0.0f) {
 		XrVector3f forward = {0.0f, 0.0f, positionOffset.z * scale};
 		forward = XrQuaternionf_Rotate(invView.orientation, forward);
@@ -918,7 +963,6 @@ void UpdateVRViewMatrices() {
 		M[7] += forward.y;
 		M[11] += forward.z;
 	}
-	// Camera adjust - height
 	if (fabsf(positionOffset.y) > 0.0f) {
 		XrVector3f up = {0.0f, -positionOffset.y * scale, 0.0f};
 		up = XrQuaternionf_Rotate(invView.orientation, up);
@@ -927,7 +971,6 @@ void UpdateVRViewMatrices() {
 		M[7] += up.y;
 		M[11] += up.z;
 	}
-	// Camera adjust - side
 	if (fabsf(positionOffset.x) > 0.0f) {
 		XrVector3f side = {-positionOffset.x * scale, 0.0f,  0.0f};
 		side = XrQuaternionf_Rotate(invView.orientation, side);
@@ -937,47 +980,55 @@ void UpdateVRViewMatrices() {
 		M[11] += side.z;
 	}
 
-	// Save base view matrix before per-eye stereo offsets
-	float M_base[16];
-	memcpy(M_base, M, sizeof(float) * 16);
-
+	// True Stereo: each eye uses its own pose, position transformed into view space.
+	// The old code applied world-space position directly to view-space translation
+	// (M[3]-=pos.x), which is wrong when the head is rotated — the IPD axis
+	// doesn't align with world X anymore. The correct transform is:
+	//   V_translate = -(R_view * world_position)
+	// where R_view is the rotation submatrix already in M[0..2], M[4..6], M[8..10].
+	bool vrStereo = !PSP_CoreParameter().compat.vrCompat().ForceMono && g_Config.bEnableStereo;
 	for (int matrix = VR_VIEW_MATRIX_LEFT_EYE; matrix <= VR_VIEW_MATRIX_RIGHT_EYE; matrix++) {
-		// Reset to base each iteration (non-cumulative per-eye offset)
-		memcpy(M, M_base, sizeof(float) * 16);
+		int eyeIndex = matrix - VR_VIEW_MATRIX_LEFT_EYE;
+		float eyeM[16];
+		memcpy(eyeM, M, sizeof(float) * 16);
 
-		// Stereoscopy: use OpenXR per-eye positions directly.
-		// M_base has vrView[0] (left eye) position baked in via 6DoF code above.
-		// For each eye, apply the world-space delta from vrView[0] to vrView[eyeIndex].
-		// This avoids sign/rotation ambiguity — the runtime provides correct per-eye poses.
-		bool vrStereo = !PSP_CoreParameter().compat.vrCompat().ForceMono && g_Config.bEnableStereo;
-		if (vrStereo && IsVREnabled()) {
-			int eyeIndex = matrix - VR_VIEW_MATRIX_LEFT_EYE; // 0=left, 1=right
+		// Compute head center position (6DoF) and per-eye IPD offset (stereo) separately.
+		// IPD offset must apply even when 6DoF is off — it's the stereo disparity source.
+		XrVector3f headPos = {0, 0, 0};
+		XrVector3f ipdOffset = {0, 0, 0};
 
-			// Intensity: 0% = flat (no offset), 100% = natural IPD, >100% = exaggerated
-			float intensity = g_Config.fStereoIntensity / 100.0f;
+		float intensity = g_Config.fStereoIntensity / 100.0f;
 
-			// Delta from left eye to this eye (world-space), scaled by intensity
-			float dx = (vrView[eyeIndex].pose.position.x - vrView[0].pose.position.x) * intensity;
-			float dy = (vrView[eyeIndex].pose.position.y - vrView[0].pose.position.y) * intensity;
-			float dz = (vrView[eyeIndex].pose.position.z - vrView[0].pose.position.z) * intensity;
-
-			// Apply with same mirroring and convention as 6DoF position (line ~908)
-			M[3] -= dx * (vrMirroring[VR_MIRRORING_AXIS_X] ? -1.0f : 1.0f) * scale;
-			M[7] -= dy * (vrMirroring[VR_MIRRORING_AXIS_Y] ? -1.0f : 1.0f) * scale;
-			M[11] -= dz * (vrMirroring[VR_MIRRORING_AXIS_Z] ? -1.0f : 1.0f) * scale;
-
-			// Stereo debug logging (Stage 1)
-			static int stereoLogCount = 0;
-			if (stereoLogCount < 60) {
-				char buf[256];
-				snprintf(buf, sizeof(buf),
-					"[VR-STEREO] eye=%d dx=%.6f dy=%.6f dz=%.6f M_tx=%.6f intensity=%.0f%%",
-					eyeIndex, dx, dy, dz, M[3], intensity * 100.0f);
-				VRLog(buf);
-				stereoLogCount++;
+		if (g_Config.bEnable6DoF && !flatScreen && IsVREnabled()) {
+			headPos = vrView[0].pose.position;
+			// Scale head translations with stereo intensity so depth perception
+			// and head parallax stay perceptually consistent.
+			if (vrStereo) {
+				headPos.x *= intensity;
+				headPos.y *= intensity;
+				headPos.z *= intensity;
 			}
 		}
 
-		memcpy(vrMatrix[matrix], M, sizeof(float) * 16);
+		if (vrStereo && IsVREnabled()) {
+			ipdOffset.x = (vrView[eyeIndex].pose.position.x - vrView[0].pose.position.x) * intensity;
+			ipdOffset.y = (vrView[eyeIndex].pose.position.y - vrView[0].pose.position.y) * intensity;
+			ipdOffset.z = (vrView[eyeIndex].pose.position.z - vrView[0].pose.position.z) * intensity;
+		}
+
+		// Apply combined position: transform world-space position into view space
+		XrVector3f totalPos = {headPos.x + ipdOffset.x, headPos.y + ipdOffset.y, headPos.z + ipdOffset.z};
+		if ((g_Config.bEnable6DoF || vrStereo) && IsVREnabled()) {
+			float px = totalPos.x * (vrMirroring[VR_MIRRORING_AXIS_X] ? -1.0f : 1.0f) * scale;
+			float py = totalPos.y * (vrMirroring[VR_MIRRORING_AXIS_Y] ? -1.0f : 1.0f) * scale;
+			float pz = totalPos.z * (vrMirroring[VR_MIRRORING_AXIS_Z] ? -1.0f : 1.0f) * scale;
+
+			// V_translate = -(R_view * world_pos)
+			eyeM[3]  -= (eyeM[0]*px + eyeM[1]*py + eyeM[2]*pz);
+			eyeM[7]  -= (eyeM[4]*px + eyeM[5]*py + eyeM[6]*pz);
+			eyeM[11] -= (eyeM[8]*px + eyeM[9]*py + eyeM[10]*pz);
+		}
+
+		memcpy(vrMatrix[matrix], eyeM, sizeof(float) * 16);
 	}
 }

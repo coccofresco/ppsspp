@@ -420,14 +420,24 @@ void VR_FinishFrame( engine_t* engine ) {
 	if (headTracking && reprojection) {
 		VR_SetConfigFloat(VR_CONFIG_MENU_YAW, hmdorientation.y);
 
-		for (int eye = 0; eye < ovrMaxNumEyes; eye++) {;
+		for (int eye = 0; eye < ovrMaxNumEyes; eye++) {
 			ovrFramebuffer* frameBuffer = &engine->appState.Renderer.FrameBuffer[0];
 			XrPosef pose = invViewTransform[0];
-			if (vrMode != VR_MODE_MONO_6DOF) {
-				pose = invViewTransform[eye];
-			}
 			if (vrMode == VR_MODE_STEREO_6DOF) {
 				frameBuffer = &engine->appState.Renderer.FrameBuffer[eye];
+				// True Stereo submission: must match the view matrix exactly.
+				// Position is interpolated by stereo intensity (same as UpdateVRViewMatrices).
+				// Orientation is per-eye (may include toe-in on some runtimes).
+				float intensity = VR_GetConfigFloat(VR_CONFIG_STEREO_INTENSITY);
+				pose.orientation = invViewTransform[eye].orientation;
+				pose.position.x = invViewTransform[0].position.x +
+					(invViewTransform[eye].position.x - invViewTransform[0].position.x) * intensity;
+				pose.position.y = invViewTransform[0].position.y +
+					(invViewTransform[eye].position.y - invViewTransform[0].position.y) * intensity;
+				pose.position.z = invViewTransform[0].position.z +
+					(invViewTransform[eye].position.z - invViewTransform[0].position.z) * intensity;
+			} else if (vrMode != VR_MODE_MONO_6DOF) {
+				pose = invViewTransform[eye];
 			}
 
 			memset(&projection_layer_elements[eye], 0, sizeof(XrCompositionLayerProjectionView));
@@ -451,23 +461,6 @@ void VR_FinishFrame( engine_t* engine ) {
 			}
 
 			// Depth info chaining disabled: depth swapchain not populated during rendering
-		}
-
-		// Stage 4 debug: confirm submission eye→FBO→pose mapping
-		static int submitLogCount = 0;
-		if (submitLogCount < 30 && vrMode == VR_MODE_STEREO_6DOF) {
-			for (int e = 0; e < ovrMaxNumEyes; e++) {
-				char buf[256];
-				snprintf(buf, sizeof(buf),
-					"[VR-STEREO-S4] submit eye=%d swapchain=%p pose.x=%.6f fov.L=%.2f fov.R=%.2f",
-					e,
-					(void*)projection_layer_elements[e].subImage.swapchain,
-					projection_layer_elements[e].pose.position.x,
-					projection_layer_elements[e].fov.angleLeft,
-					projection_layer_elements[e].fov.angleRight);
-				VRLog(buf);
-			}
-			submitLogCount++;
 		}
 
 		XrCompositionLayerProjection projection_layer = {};
@@ -494,59 +487,56 @@ void VR_FinishFrame( engine_t* engine ) {
 		XrQuaternionf pitch = XrQuaternionf_CreateFromVectorAngle({1, 0, 0}, -menuPitch);
 		XrQuaternionf yaw = XrQuaternionf_CreateFromVectorAngle({0, 1, 0}, menuYaw);
 
-#ifdef ANDROID
-		// On Android (Quest/Pico), use cylinder layer for curved cinema screen
-		XrCompositionLayerCylinderKHR cylinder_layer = {};
-		cylinder_layer.type = XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR;
-		cylinder_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
-		cylinder_layer.space = engine->appState.CurrentSpace;
-		memset(&cylinder_layer.subImage, 0, sizeof(XrSwapchainSubImage));
-		cylinder_layer.subImage.imageRect.offset.x = 0;
-		cylinder_layer.subImage.imageRect.offset.y = 0;
-		cylinder_layer.subImage.imageRect.extent.width = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Width;
-		cylinder_layer.subImage.imageRect.extent.height = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Height;
-		cylinder_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Handle;
-		cylinder_layer.subImage.imageArrayIndex = 0;
-		cylinder_layer.pose.orientation = XrQuaternionf_Multiply(pitch, yaw);
-		cylinder_layer.pose.position = pos;
-		cylinder_layer.radius = 2.0f;
-		cylinder_layer.centralAngle = (float)(M_PI * 0.5);
-		cylinder_layer.aspectRatio = VR_GetConfigFloat(VR_CONFIG_CANVAS_ASPECT);
-		if (headTracking && !reprojection) {
-			float width = (float)engine->appState.ViewConfigurationView[0].recommendedImageRectWidth;
-			float height = (float)engine->appState.ViewConfigurationView[0].recommendedImageRectHeight;
-			cylinder_layer.aspectRatio = 2.0f * width / height;
-			cylinder_layer.centralAngle = (float)(M_PI);
-		}
+		if (VR_GetPlatformFlag(VR_PLATFORM_EXTENSION_CYLINDER)) {
+			// Cylinder layer for curved cinema screen (Quest Link, Pico, any runtime with cylinder support)
+			XrCompositionLayerCylinderKHR cylinder_layer = {};
+			cylinder_layer.type = XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR;
+			cylinder_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+			cylinder_layer.space = engine->appState.CurrentSpace;
+			memset(&cylinder_layer.subImage, 0, sizeof(XrSwapchainSubImage));
+			cylinder_layer.subImage.imageRect.offset.x = 0;
+			cylinder_layer.subImage.imageRect.offset.y = 0;
+			cylinder_layer.subImage.imageRect.extent.width = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Width;
+			cylinder_layer.subImage.imageRect.extent.height = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Height;
+			cylinder_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Handle;
+			cylinder_layer.subImage.imageArrayIndex = 0;
+			cylinder_layer.pose.orientation = XrQuaternionf_Multiply(pitch, yaw);
+			cylinder_layer.pose.position = pos;
+			cylinder_layer.radius = 2.0f;
+			cylinder_layer.centralAngle = (float)(M_PI * 0.5);
+			cylinder_layer.aspectRatio = VR_GetConfigFloat(VR_CONFIG_CANVAS_ASPECT);
+			if (headTracking && !reprojection) {
+				float width = (float)engine->appState.ViewConfigurationView[0].recommendedImageRectWidth;
+				float height = (float)engine->appState.ViewConfigurationView[0].recommendedImageRectHeight;
+				cylinder_layer.aspectRatio = 2.0f * width / height;
+				cylinder_layer.centralAngle = (float)(M_PI);
+			}
 
-		// Build the cylinder layer
-		if ((vrMode == VR_MODE_MONO_SCREEN) || (vrMode == VR_MODE_MONO_6DOF)) {
-			cylinder_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
-			engine->appState.Layers[engine->appState.LayerCount++].Cylinder = cylinder_layer;
-		} else if ((vrMode == VR_MODE_SBS_SCREEN) || (vrMode == VR_MODE_SBS_6DOF)) {
-			cylinder_layer.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
-			cylinder_layer.subImage.imageRect.extent.width /= 2;
-			engine->appState.Layers[engine->appState.LayerCount++].Cylinder = cylinder_layer;
-			cylinder_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
-			cylinder_layer.subImage.imageRect.offset.x += cylinder_layer.subImage.imageRect.extent.width;
-			engine->appState.Layers[engine->appState.LayerCount++].Cylinder = cylinder_layer;
+			// Build the cylinder layer
+			if ((vrMode == VR_MODE_MONO_SCREEN) || (vrMode == VR_MODE_MONO_6DOF)) {
+				cylinder_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+				engine->appState.Layers[engine->appState.LayerCount++].Cylinder = cylinder_layer;
+			} else if ((vrMode == VR_MODE_SBS_SCREEN) || (vrMode == VR_MODE_SBS_6DOF)) {
+				cylinder_layer.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
+				cylinder_layer.subImage.imageRect.extent.width /= 2;
+				engine->appState.Layers[engine->appState.LayerCount++].Cylinder = cylinder_layer;
+				cylinder_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
+				cylinder_layer.subImage.imageRect.offset.x += cylinder_layer.subImage.imageRect.extent.width;
+				engine->appState.Layers[engine->appState.LayerCount++].Cylinder = cylinder_layer;
+			} else {
+				cylinder_layer.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
+				engine->appState.Layers[engine->appState.LayerCount++].Cylinder = cylinder_layer;
+				cylinder_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
+				cylinder_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[1].ColorSwapChain.Handle;
+				engine->appState.Layers[engine->appState.LayerCount++].Cylinder = cylinder_layer;
+			}
 		} else {
-			cylinder_layer.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
-			engine->appState.Layers[engine->appState.LayerCount++].Cylinder = cylinder_layer;
-			cylinder_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
-			cylinder_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[1].ColorSwapChain.Handle;
-			engine->appState.Layers[engine->appState.LayerCount++].Cylinder = cylinder_layer;
-		}
-#else
-		VR_SetConfig(VR_CONFIG_DEPTH_SUBMIT, 0);
-		{
+			// Quad layer fallback (SteamVR and runtimes without cylinder support)
+			VR_SetConfig(VR_CONFIG_DEPTH_SUBMIT, 0);
 			float aspect = VR_GetConfigFloat(VR_CONFIG_CANVAS_ASPECT);
 			float screenWidth, screenHeight;
 
 			if (headTracking && !reprojection) {
-				// Immersive mode: wide-FOV game content on a large world-locked quad.
-				// Use FBO dimensions for aspect (matching Quest's cylinder layer approach).
-				// Game renders at 2x horizontal FOV (M[0] halved), so FBO aspect doubles.
 				float fboW = (float)engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Width;
 				float fboH = (float)engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Height;
 				aspect = 2.0f * fboW / fboH;
@@ -557,11 +547,9 @@ void VR_FinishFrame( engine_t* engine ) {
 					pos.y += invViewTransform[0].position.y;
 					pos.z += invViewTransform[0].position.z;
 				}
-				// Quad subtends ~120 deg horizontal (2*60), covering typical HMD FOV
 				screenWidth = 2.0f * immersiveDist * tanf(60.0f * (float)M_PI / 180.0f);
 				screenHeight = screenWidth / aspect;
 			} else {
-				// Cinema mode: floating screen at configurable distance
 				float fovScale = VR_GetConfigFloat(VR_CONFIG_FOV_SCALE);
 				if (fovScale < 1.0f) fovScale = 1.0f;
 				float absDistance = fabs(distance);
@@ -607,7 +595,6 @@ void VR_FinishFrame( engine_t* engine ) {
 				engine->appState.Layers[engine->appState.LayerCount++].Quad = quad_layer;
 			}
 		}
-#endif
 	}
 
 	// Compose the layers for this frame.

@@ -389,11 +389,8 @@ void LinkedShader::UpdateUniforms(const ShaderID &vsid, bool useBufferedRenderin
 	dirtyUniforms = 0;
 
 	// Analyze scene
-	bool is2D = false, flatScreen = false;
-
-	const bool useVR = gstate_c.Use(GPU_USE_VIRTUAL_REALITY);
-
-	if (useVR) {
+	bool is2D, flatScreen;
+	if (gstate_c.Use(GPU_USE_VIRTUAL_REALITY)) {
 		is2D = Is2DVRObject(gstate.projMatrix, gstate.isModeThrough());
 		flatScreen = IsFlatVRScene();
 	}
@@ -413,7 +410,7 @@ void LinkedShader::UpdateUniforms(const ShaderID &vsid, bool useBufferedRenderin
 	}
 
 	// Set HUD mode
-	if (useVR) {
+	if (gstate_c.Use(GPU_USE_VIRTUAL_REALITY)) {
 		if (GuessVRDrawingHUD(is2D, flatScreen)) {
 			float aspect = 480.0f / 272.0f * (IsImmersiveVRMode() ? 0.5f : 1.0f);
 			render_->SetUniformF1(&u_scaleX, g_Config.fHeadUpDisplayScale * aspect);
@@ -426,19 +423,30 @@ void LinkedShader::UpdateUniforms(const ShaderID &vsid, bool useBufferedRenderin
 
 	// Update any dirty uniforms before we draw
 	if (dirty & DIRTY_PROJMATRIX) {
-		if (useVR) {
-			Matrix4x4 vrProjection;
-			if (flatScreen || is2D) {
-				memcpy(&vrProjection, gstate.projMatrix, 16 * sizeof(float));
+		if (gstate_c.Use(GPU_USE_VIRTUAL_REALITY)) {
+			bool vrStereoActive = !flatScreen && !is2D && GetVRPassesCount() > 1;
+			if (vrStereoActive) {
+				// Per-eye asymmetric projection so rendering FOV matches submission FOV exactly.
+				Matrix4x4 vrProjLeft, vrProjRight;
+				UpdateVRProjectionStereo(gstate.projMatrix, vrProjLeft.m, vrProjRight.m);
+				UpdateVRParams(gstate.projMatrix);
+				FlipProjMatrix(vrProjLeft, useBufferedRendering);
+				ScaleProjMatrix(vrProjLeft, useBufferedRendering);
+				FlipProjMatrix(vrProjRight, useBufferedRendering);
+				ScaleProjMatrix(vrProjRight, useBufferedRendering);
+				render_->SetUniformM4x4Stereo("u_proj_lens", &u_proj_lens, vrProjLeft.m, vrProjRight.m);
 			} else {
-				UpdateVRProjection(gstate.projMatrix, vrProjection.m);
+				Matrix4x4 vrProjection;
+				if (flatScreen || is2D) {
+					memcpy(&vrProjection, gstate.projMatrix, 16 * sizeof(float));
+				} else {
+					UpdateVRProjection(gstate.projMatrix, vrProjection.m);
+				}
+				UpdateVRParams(gstate.projMatrix);
+				FlipProjMatrix(vrProjection, useBufferedRendering);
+				ScaleProjMatrix(vrProjection, useBufferedRendering);
+				render_->SetUniformM4x4(&u_proj_lens, vrProjection.m);
 			}
-			UpdateVRParams(gstate.projMatrix);
-
-			FlipProjMatrix(vrProjection, useBufferedRendering);
-			ScaleProjMatrix(vrProjection, useBufferedRendering);
-
-			render_->SetUniformM4x4(&u_proj_lens, vrProjection.m);
 		}
 
 		Matrix4x4 flippedMatrix;
@@ -485,7 +493,7 @@ void LinkedShader::UpdateUniforms(const ShaderID &vsid, bool useBufferedRenderin
 	}
 	if (dirty & DIRTY_FOGCOLOR) {
 		SetColorUniform3(render_, &u_fogcolor, gstate.fogcolor);
-		if (useVR) {
+		if (gstate_c.Use(GPU_USE_VIRTUAL_REALITY)) {
 			SetVRCompat(VR_COMPAT_FOG_COLOR, gstate.fogcolor);
 		}
 	}
@@ -570,7 +578,7 @@ void LinkedShader::UpdateUniforms(const ShaderID &vsid, bool useBufferedRenderin
 		SetMatrix4x3(render_, &u_world, gstate.worldMatrix);
 	}
 	if (dirty & DIRTY_VIEWMATRIX) {
-		if (useVR) {
+		if (gstate_c.Use(GPU_USE_VIRTUAL_REALITY)) {
 			float leftEyeView[16];
 			float rightEyeView[16];
 			ConvertMatrix4x3To4x4Transposed(leftEyeView, gstate.viewMatrix);

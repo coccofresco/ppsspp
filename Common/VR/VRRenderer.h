@@ -31,6 +31,9 @@ enum VRConfigFloat {
 	//viewport setup
 	VR_CONFIG_VIEWPORT_SUPERSAMPLING,
 
+	// stereo 3D intensity (0.0 - 1.5, from fStereoIntensity / 100)
+	VR_CONFIG_STEREO_INTENSITY,
+
 	VR_CONFIG_FLOAT_MAX
 };
 

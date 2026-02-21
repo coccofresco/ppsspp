@@ -70,5 +70,6 @@ bool IsImmersiveVRMode();
 bool Is2DVRObject(float* projMatrix, bool ortho);
 void UpdateVRParams(float* projMatrix);
 void UpdateVRProjection(float* projMatrix, float* output);
+void UpdateVRProjectionStereo(float* projMatrix, float* leftOutput, float* rightOutput);
 void UpdateVRView(float* leftEye, float* rightEye);
 void UpdateVRViewMatrices();
