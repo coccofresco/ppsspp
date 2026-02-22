@@ -87,6 +87,16 @@ void VR_Init( void* system, const char* name, int version ) {
 					VR_SetPlatformFLag(VR_PLATFORM_EXTENSION_CYLINDER, true);
 					VRLog("[VR_Init] Cylinder composition layer extension available and enabled");
 				}
+				if (strcmp(ext.extensionName, XR_KHR_COMPOSITION_LAYER_EQUIRECT2_EXTENSION_NAME) == 0) {
+					extensions.push_back(XR_KHR_COMPOSITION_LAYER_EQUIRECT2_EXTENSION_NAME);
+					VR_SetPlatformFLag(VR_PLATFORM_EXTENSION_EQUIRECT2, true);
+					VRLog("[VR_Init] Equirect2 composition layer extension available and enabled");
+				}
+				if (strcmp(ext.extensionName, XR_KHR_COMPOSITION_LAYER_EQUIRECT_EXTENSION_NAME) == 0) {
+					extensions.push_back(XR_KHR_COMPOSITION_LAYER_EQUIRECT_EXTENSION_NAME);
+					VR_SetPlatformFLag(VR_PLATFORM_EXTENSION_EQUIRECT, true);
+					VRLog("[VR_Init] Equirect composition layer extension available and enabled");
+				}
 			}
 		}
 	}

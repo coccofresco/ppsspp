@@ -45,13 +45,15 @@ static void OXR_CheckErrors(XrInstance instance, XrResult result, const char* fu
 #define DECL_PFN(pfn) PFN_##pfn pfn = nullptr
 #define INIT_PFN(pfn) OXR(xrGetInstanceProcAddr(engine->appState.Instance, #pfn, (PFN_xrVoidFunction*)(&pfn)))
 
-enum { ovrMaxLayerCount = 3 };
+enum { ovrMaxLayerCount = 4 };
 enum { ovrMaxNumEyes = 2 };
 
 typedef union {
 	XrCompositionLayerProjection Projection;
 	XrCompositionLayerQuad Quad;
 	XrCompositionLayerCylinderKHR Cylinder;
+	XrCompositionLayerEquirectKHR Equirect;
+	XrCompositionLayerEquirect2KHR Equirect2;
 	XrCompositionLayerPassthroughFB Passthrough;
 } ovrCompositorLayer_Union;
 
@@ -127,6 +129,8 @@ enum VRPlatformFlag {
 	VR_PLATFORM_EXTENSION_PERFORMANCE,
 	VR_PLATFORM_EXTENSION_DEPTH,
 	VR_PLATFORM_EXTENSION_CYLINDER,
+	VR_PLATFORM_EXTENSION_EQUIRECT,
+	VR_PLATFORM_EXTENSION_EQUIRECT2,
 	VR_PLATFORM_TRACKING_FLOOR,
 	VR_PLATFORM_MAX
 };

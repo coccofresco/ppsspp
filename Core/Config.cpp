@@ -1124,6 +1124,7 @@ static const ConfigSetting vrSettings[] = {
 	ConfigSetting("VREnable", SETTING(g_Config, bEnableVR), true, CfgFlag::PER_GAME),
 	ConfigSetting("VREnable6DoF", SETTING(g_Config, bEnable6DoF), true, CfgFlag::PER_GAME),
 	ConfigSetting("VREnableStereo", SETTING(g_Config, bEnableStereo), false, CfgFlag::PER_GAME),
+	ConfigSetting("VRDisplaySurface", SETTING(g_Config, iVRDisplaySurface), 0, CfgFlag::PER_GAME),
 	ConfigSetting("VRStereoIntensity", SETTING(g_Config, fStereoIntensity), 70.0f, CfgFlag::PER_GAME),
 	ConfigSetting("VRHeadTracking", SETTING(g_Config, bHeadTracking), false, CfgFlag::PER_GAME),
 	ConfigSetting("VRHeadTrackingSensitivity", SETTING(g_Config, fHeadTrackingSensitivity), 1.0f, CfgFlag::PER_GAME),

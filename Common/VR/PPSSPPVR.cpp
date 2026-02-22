@@ -679,6 +679,7 @@ bool StartVRRender() {
 		VR_SetConfigFloat(VR_CONFIG_FOV_SCALE, g_Config.fFieldOfViewPercentage / 100.0f);
 		VR_SetConfigFloat(VR_CONFIG_STEREO_INTENSITY, g_Config.fStereoIntensity / 100.0f);
 		VR_SetConfig(VR_CONFIG_CANVAS_6DOF, g_Config.bEnable6DoF);
+		VR_SetConfig(VR_CONFIG_DISPLAY_SURFACE, g_Config.iVRDisplaySurface);
 		VR_SetConfig(VR_CONFIG_PASSTHROUGH, g_Config.bPassthrough && IsPassthroughSupported());
 		return true;
 	}
