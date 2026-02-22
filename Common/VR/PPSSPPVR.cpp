@@ -146,8 +146,24 @@ bool IsVREnabled() {
 }
 
 #if XR_USE_PLATFORM_WIN32
+static const char* vrLogPath = nullptr;
 void VRLog(const char* msg) {
-	FILE* f = fopen("vr_debug.log", "a");
+	if (!vrLogPath) {
+		// Use absolute path next to executable
+		static char logPath[512];
+		char exePath[512];
+		GetModuleFileNameA(NULL, exePath, sizeof(exePath));
+		// Replace exe name with log name
+		char* lastSlash = strrchr(exePath, '\\');
+		if (lastSlash) {
+			*(lastSlash + 1) = '\0';
+			snprintf(logPath, sizeof(logPath), "%svr_debug.log", exePath);
+		} else {
+			snprintf(logPath, sizeof(logPath), "vr_debug.log");
+		}
+		vrLogPath = logPath;
+	}
+	FILE* f = fopen(vrLogPath, "a");
 	if (f) { fprintf(f, "%s\n", msg); fclose(f); }
 }
 
@@ -576,7 +592,9 @@ void GetVRFramebufferSize(int *width, int *height) {
 }
 
 bool StartVRRender() {
+	VRLog("[StartVRRender] entered");
 	if (!VR_GetConfig(VR_CONFIG_VIEWPORT_VALID)) {
+		VRLog("[StartVRRender] calling VR_InitRenderer...");
 		VR_InitRenderer(VR_GetEngine());
 		VR_SetConfig(VR_CONFIG_VIEWPORT_VALID, true);
 

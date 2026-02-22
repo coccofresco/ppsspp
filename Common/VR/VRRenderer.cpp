@@ -192,21 +192,25 @@ void VR_GetResolution(engine_t* engine, int *pWidth, int *pHeight) {
 	static int width = 0;
 	static int height = 0;
 
+	VRLog("[VR_GetResolution] entered");
 	if (engine) {
+		VRLog("[VR_GetResolution] engine valid, enumerating view configs...");
 		// Enumerate the viewport configurations.
 		uint32_t viewportConfigTypeCount = 0;
-		OXR(xrEnumerateViewConfigurations(
-				engine->appState.Instance, engine->appState.SystemId, 0, &viewportConfigTypeCount, NULL));
+		xrEnumerateViewConfigurations(
+				engine->appState.Instance, engine->appState.SystemId, 0, &viewportConfigTypeCount, NULL);
+		VRLog("[VR_GetResolution] xrEnumerateViewConfigurations count OK");
 
 		XrViewConfigurationType* viewportConfigurationTypes =
 				(XrViewConfigurationType*)malloc(viewportConfigTypeCount * sizeof(XrViewConfigurationType));
 
-		OXR(xrEnumerateViewConfigurations(
+		xrEnumerateViewConfigurations(
 				engine->appState.Instance,
 				engine->appState.SystemId,
 				viewportConfigTypeCount,
 				&viewportConfigTypeCount,
-				viewportConfigurationTypes));
+				viewportConfigurationTypes);
+		VRLog("[VR_GetResolution] xrEnumerateViewConfigurations list OK");
 
 		ALOGV("Available Viewport Configuration Types: %d", viewportConfigTypeCount);
 
@@ -220,16 +224,16 @@ void VR_GetResolution(engine_t* engine, int *pWidth, int *pHeight) {
 
 			XrViewConfigurationProperties viewportConfig;
 			viewportConfig.type = XR_TYPE_VIEW_CONFIGURATION_PROPERTIES;
-			OXR(xrGetViewConfigurationProperties(
-					engine->appState.Instance, engine->appState.SystemId, viewportConfigType, &viewportConfig));
+			xrGetViewConfigurationProperties(
+					engine->appState.Instance, engine->appState.SystemId, viewportConfigType, &viewportConfig);
 			ALOGV(
 					"FovMutable=%s ConfigurationType %d",
 					viewportConfig.fovMutable ? "true" : "false",
 					viewportConfig.viewConfigurationType);
 
 			uint32_t viewCount;
-			OXR(xrEnumerateViewConfigurationViews(
-					engine->appState.Instance, engine->appState.SystemId, viewportConfigType, 0, &viewCount, NULL));
+			xrEnumerateViewConfigurationViews(
+					engine->appState.Instance, engine->appState.SystemId, viewportConfigType, 0, &viewCount, NULL);
 
 			if (viewCount > 0) {
 				XrViewConfigurationView* elements =
@@ -240,13 +244,13 @@ void VR_GetResolution(engine_t* engine, int *pWidth, int *pHeight) {
 					elements[e].next = NULL;
 				}
 
-				OXR(xrEnumerateViewConfigurationViews(
+				xrEnumerateViewConfigurationViews(
 						engine->appState.Instance,
 						engine->appState.SystemId,
 						viewportConfigType,
 						viewCount,
 						&viewCount,
-						elements));
+						elements);
 
 				// Cache the view config properties for the selected config type.
 				if (viewportConfigType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO) {
@@ -263,9 +267,11 @@ void VR_GetResolution(engine_t* engine, int *pWidth, int *pHeight) {
 		}
 
 		free(viewportConfigurationTypes);
+		VRLog("[VR_GetResolution] view config loop done");
 
 		*pWidth = width = engine->appState.ViewConfigurationView[0].recommendedImageRectWidth;
 		*pHeight = height = engine->appState.ViewConfigurationView[0].recommendedImageRectHeight;
+		VRLog("[VR_GetResolution] resolution cached");
 	} else {
 		//use cached values
 		*pWidth = width;
@@ -333,10 +339,12 @@ void VR_Recenter(engine_t* engine) {
 }
 
 void VR_InitRenderer( engine_t* engine ) {
+	VRLog("[VR_InitRenderer] entered");
 	if (initialized) {
 		VR_DestroyRenderer(engine);
 	}
 
+	VRLog("[VR_InitRenderer] checking passthrough...");
 	if (VR_GetPlatformFlag(VRPlatformFlag::VR_PLATFORM_EXTENSION_PASSTHROUGH)) {
 		INIT_PFN(xrCreatePassthroughFB);
 		INIT_PFN(xrDestroyPassthroughFB);
@@ -348,19 +356,23 @@ void VR_InitRenderer( engine_t* engine ) {
 		INIT_PFN(xrPassthroughLayerResumeFB);
 	}
 
+	VRLog("[VR_InitRenderer] calling VR_GetResolution...");
 	int eyeW, eyeH;
 	VR_GetResolution(engine, &eyeW, &eyeH);
 	VR_SetConfig(VR_CONFIG_VIEWPORT_WIDTH, eyeW);
 	VR_SetConfig(VR_CONFIG_VIEWPORT_HEIGHT, eyeH);
+	VRLog("[VR_InitRenderer] VR_GetResolution OK");
 
 	// Get the viewport configuration info for the chosen viewport configuration type.
 	engine->appState.ViewportConfig.type = XR_TYPE_VIEW_CONFIGURATION_PROPERTIES;
 	OXR(xrGetViewConfigurationProperties(engine->appState.Instance, engine->appState.SystemId, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, &engine->appState.ViewportConfig));
+	VRLog("[VR_InitRenderer] xrGetViewConfigurationProperties OK");
 
 	uint32_t numOutputSpaces = 0;
 	OXR(xrEnumerateReferenceSpaces(engine->appState.Session, 0, &numOutputSpaces, NULL));
 	XrReferenceSpaceType* referenceSpaces = (XrReferenceSpaceType*)malloc(numOutputSpaces * sizeof(XrReferenceSpaceType));
 	OXR(xrEnumerateReferenceSpaces(engine->appState.Session, numOutputSpaces, &numOutputSpaces, referenceSpaces));
+	VRLog("[VR_InitRenderer] xrEnumerateReferenceSpaces OK");
 
 	for (uint32_t i = 0; i < numOutputSpaces; i++) {
 		if (referenceSpaces[i] == XR_REFERENCE_SPACE_TYPE_STAGE) {
@@ -372,7 +384,9 @@ void VR_InitRenderer( engine_t* engine ) {
 	free(referenceSpaces);
 
 	if (engine->appState.CurrentSpace == XR_NULL_HANDLE) {
+		VRLog("[VR_InitRenderer] calling VR_Recenter...");
 		VR_Recenter(engine);
+		VRLog("[VR_InitRenderer] VR_Recenter OK");
 	}
 
 	projections = (XrView*)(malloc(ovrMaxNumEyes * sizeof(XrView)));
@@ -387,7 +401,9 @@ void VR_InitRenderer( engine_t* engine ) {
 			eyeW, eyeH, VR_GetConfigFloat(VR_CONFIG_VIEWPORT_SUPERSAMPLING));
 		VRLog(buf);
 	}
+	VRLog("[VR_InitRenderer] calling ovrRenderer_Create (includes staging FBO)...");
 	ovrRenderer_Create(engine->appState.Session, &engine->appState.Renderer, eyeW, eyeH);
+	VRLog("[VR_InitRenderer] ovrRenderer_Create OK");
 
 	if (VR_GetPlatformFlag(VRPlatformFlag::VR_PLATFORM_EXTENSION_PASSTHROUGH)) {
 		XrPassthroughCreateInfoFB ptci = {XR_TYPE_PASSTHROUGH_CREATE_INFO_FB};
@@ -514,13 +530,25 @@ bool VR_InitFrame( engine_t* engine ) {
 	return true;
 }
 
+static int vrFrameLogCount = 0;
+
 void VR_BeginFrame( engine_t* engine, int fboIndex ) {
+	if (vrFrameLogCount < 5) {
+		char buf[128];
+		snprintf(buf, sizeof(buf), "[VR_BeginFrame] fboIndex=%d frame=%d", fboIndex, vrFrameLogCount);
+		VRLog(buf);
+	}
 	vrConfig[VR_CONFIG_CURRENT_FBO] = fboIndex;
 	ovrFramebuffer_Acquire(&engine->appState.Renderer.FrameBuffer[fboIndex]);
 }
 
 void VR_EndFrame( engine_t* engine ) {
 	int fboIndex = vrConfig[VR_CONFIG_CURRENT_FBO];
+	if (vrFrameLogCount < 5) {
+		char buf[128];
+		snprintf(buf, sizeof(buf), "[VR_EndFrame] fboIndex=%d displaySurface=%d", fboIndex, vrConfig[VR_CONFIG_DISPLAY_SURFACE]);
+		VRLog(buf);
+	}
 	VR_BindFramebuffer(engine);
 
 	// Show mouse cursor
@@ -561,6 +589,13 @@ void VR_EndFrame( engine_t* engine ) {
 }
 
 void VR_FinishFrame( engine_t* engine ) {
+	if (vrFrameLogCount < 5) {
+		char buf[256];
+		snprintf(buf, sizeof(buf), "[VR_FinishFrame] mode=%d displaySurface=%d reproj=%d layerCount=%d",
+			vrConfig[VR_CONFIG_MODE], vrConfig[VR_CONFIG_DISPLAY_SURFACE],
+			vrConfig[VR_CONFIG_REPROJECTION], engine->appState.LayerCount);
+		VRLog(buf);
+	}
 	if (VR_GetPlatformFlag(VRPlatformFlag::VR_PLATFORM_EXTENSION_PASSTHROUGH) && VR_GetConfig(VR_CONFIG_PASSTHROUGH)) {
 		if (passthroughLayer != XR_NULL_HANDLE) {
 			XrCompositionLayerPassthroughFB passthrough_layer = {XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB};
@@ -854,6 +889,11 @@ void VR_FinishFrame( engine_t* engine ) {
 	}
 
 	// Compose the layers for this frame.
+	if (vrFrameLogCount < 5) {
+		char buf[128];
+		snprintf(buf, sizeof(buf), "[VR_FinishFrame] layers built, layerCount=%d", engine->appState.LayerCount);
+		VRLog(buf);
+	}
 	const XrCompositionLayerBaseHeader* layers[ovrMaxLayerCount] = {};
 	for (int i = 0; i < engine->appState.LayerCount; i++) {
 		layers[i] = (const XrCompositionLayerBaseHeader*)&engine->appState.Layers[i];
@@ -876,6 +916,12 @@ void VR_FinishFrame( engine_t* engine ) {
 		char buf[256];
 		snprintf(buf, sizeof(buf), "[VR_FinishFrame] xrEndFrame FAILED: %d", (int)endResult);
 		VRLog(buf);
+	}
+	if (vrFrameLogCount < 5) {
+		char buf[128];
+		snprintf(buf, sizeof(buf), "[VR_FinishFrame] xrEndFrame result=%d, frame %d complete", (int)endResult, vrFrameLogCount);
+		VRLog(buf);
+		vrFrameLogCount++;
 	}
 }
 
