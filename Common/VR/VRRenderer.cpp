@@ -11,6 +11,8 @@
 
 extern void VRLog(const char* msg);
 
+enum VRDisplaySurface { VR_SURFACE_FLAT = 0, VR_SURFACE_CURVED = 1, VR_SURFACE_SPHERE = 2 };
+
 XrFovf fov;
 XrView* projections;
 XrPosef invViewTransform[2];
@@ -487,7 +489,20 @@ void VR_FinishFrame( engine_t* engine ) {
 		XrQuaternionf pitch = XrQuaternionf_CreateFromVectorAngle({1, 0, 0}, -menuPitch);
 		XrQuaternionf yaw = XrQuaternionf_CreateFromVectorAngle({0, 1, 0}, menuYaw);
 
-		if (VR_GetPlatformFlag(VR_PLATFORM_EXTENSION_CYLINDER)) {
+		// Determine display surface with graceful fallback chain
+		int requestedSurface = vrConfig[VR_CONFIG_DISPLAY_SURFACE];
+		int actualSurface = requestedSurface;
+		// Fallback: Sphere -> Curved -> Flat
+		if (actualSurface == VR_SURFACE_SPHERE &&
+		    !VR_GetPlatformFlag(VR_PLATFORM_EXTENSION_EQUIRECT2) &&
+		    !VR_GetPlatformFlag(VR_PLATFORM_EXTENSION_EQUIRECT)) {
+			actualSurface = VR_SURFACE_CURVED;
+		}
+		if (actualSurface == VR_SURFACE_CURVED && !VR_GetPlatformFlag(VR_PLATFORM_EXTENSION_CYLINDER)) {
+			actualSurface = VR_SURFACE_FLAT;
+		}
+
+		if (actualSurface == VR_SURFACE_CURVED) {
 			// Cylinder layer for curved cinema screen (Quest Link, Pico, any runtime with cylinder support)
 			XrCompositionLayerCylinderKHR cylinder_layer = {};
 			cylinder_layer.type = XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR;
@@ -530,8 +545,91 @@ void VR_FinishFrame( engine_t* engine ) {
 				cylinder_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[1].ColorSwapChain.Handle;
 				engine->appState.Layers[engine->appState.LayerCount++].Cylinder = cylinder_layer;
 			}
+		} else if (actualSurface == VR_SURFACE_SPHERE) {
+			// Equirect layer for spherical cinema screen
+			bool useEquirect2 = VR_GetPlatformFlag(VR_PLATFORM_EXTENSION_EQUIRECT2);
+
+			if (useEquirect2) {
+				XrCompositionLayerEquirect2KHR equirect_layer = {};
+				equirect_layer.type = XR_TYPE_COMPOSITION_LAYER_EQUIRECT2_KHR;
+				equirect_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+				equirect_layer.space = engine->appState.CurrentSpace;
+				equirect_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Handle;
+				equirect_layer.subImage.imageRect.offset.x = 0;
+				equirect_layer.subImage.imageRect.offset.y = 0;
+				equirect_layer.subImage.imageRect.extent.width = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Width;
+				equirect_layer.subImage.imageRect.extent.height = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Height;
+				equirect_layer.subImage.imageArrayIndex = 0;
+				equirect_layer.pose.orientation = XrQuaternionf_Multiply(pitch, yaw);
+				equirect_layer.pose.position = pos;
+				equirect_layer.radius = 2.0f;
+				if (headTracking && !reprojection) {
+					equirect_layer.centralHorizontalAngle = (float)(M_PI);
+					equirect_layer.upperVerticalAngle = (float)(M_PI * 0.4);
+					equirect_layer.lowerVerticalAngle = -(float)(M_PI * 0.4);
+				} else {
+					equirect_layer.centralHorizontalAngle = (float)(M_PI * 0.5);
+					equirect_layer.upperVerticalAngle = (float)(M_PI * 0.25);
+					equirect_layer.lowerVerticalAngle = -(float)(M_PI * 0.25);
+				}
+
+				// Build the equirect2 layer
+				if ((vrMode == VR_MODE_MONO_SCREEN) || (vrMode == VR_MODE_MONO_6DOF)) {
+					equirect_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+					engine->appState.Layers[engine->appState.LayerCount++].Equirect2 = equirect_layer;
+				} else if ((vrMode == VR_MODE_SBS_SCREEN) || (vrMode == VR_MODE_SBS_6DOF)) {
+					equirect_layer.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
+					equirect_layer.subImage.imageRect.extent.width /= 2;
+					engine->appState.Layers[engine->appState.LayerCount++].Equirect2 = equirect_layer;
+					equirect_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
+					equirect_layer.subImage.imageRect.offset.x += equirect_layer.subImage.imageRect.extent.width;
+					engine->appState.Layers[engine->appState.LayerCount++].Equirect2 = equirect_layer;
+				} else {
+					equirect_layer.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
+					engine->appState.Layers[engine->appState.LayerCount++].Equirect2 = equirect_layer;
+					equirect_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
+					equirect_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[1].ColorSwapChain.Handle;
+					engine->appState.Layers[engine->appState.LayerCount++].Equirect2 = equirect_layer;
+				}
+			} else {
+				// Equirect v1 fallback (SteamVR and runtimes without equirect2)
+				XrCompositionLayerEquirectKHR equirect_layer = {};
+				equirect_layer.type = XR_TYPE_COMPOSITION_LAYER_EQUIRECT_KHR;
+				equirect_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+				equirect_layer.space = engine->appState.CurrentSpace;
+				equirect_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Handle;
+				equirect_layer.subImage.imageRect.offset.x = 0;
+				equirect_layer.subImage.imageRect.offset.y = 0;
+				equirect_layer.subImage.imageRect.extent.width = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Width;
+				equirect_layer.subImage.imageRect.extent.height = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Height;
+				equirect_layer.subImage.imageArrayIndex = 0;
+				equirect_layer.pose.orientation = XrQuaternionf_Multiply(pitch, yaw);
+				equirect_layer.pose.position = pos;
+				equirect_layer.radius = 2.0f;
+				equirect_layer.scale = {1.0f, 1.0f};
+				equirect_layer.bias = {0.0f, 0.0f};
+
+				// Build the equirect v1 layer
+				if ((vrMode == VR_MODE_MONO_SCREEN) || (vrMode == VR_MODE_MONO_6DOF)) {
+					equirect_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+					engine->appState.Layers[engine->appState.LayerCount++].Equirect = equirect_layer;
+				} else if ((vrMode == VR_MODE_SBS_SCREEN) || (vrMode == VR_MODE_SBS_6DOF)) {
+					equirect_layer.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
+					equirect_layer.subImage.imageRect.extent.width /= 2;
+					engine->appState.Layers[engine->appState.LayerCount++].Equirect = equirect_layer;
+					equirect_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
+					equirect_layer.subImage.imageRect.offset.x += equirect_layer.subImage.imageRect.extent.width;
+					engine->appState.Layers[engine->appState.LayerCount++].Equirect = equirect_layer;
+				} else {
+					equirect_layer.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
+					engine->appState.Layers[engine->appState.LayerCount++].Equirect = equirect_layer;
+					equirect_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
+					equirect_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[1].ColorSwapChain.Handle;
+					engine->appState.Layers[engine->appState.LayerCount++].Equirect = equirect_layer;
+				}
+			}
 		} else {
-			// Quad layer fallback (SteamVR and runtimes without cylinder support)
+			// Quad layer for flat cinema screen (default, SteamVR and runtimes without cylinder/equirect)
 			VR_SetConfig(VR_CONFIG_DEPTH_SUBMIT, 0);
 			float aspect = VR_GetConfigFloat(VR_CONFIG_CANVAS_ASPECT);
 			float screenWidth, screenHeight;
