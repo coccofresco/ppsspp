@@ -11,7 +11,7 @@
 
 extern void VRLog(const char* msg);
 
-enum VRDisplaySurface { VR_SURFACE_FLAT = 0, VR_SURFACE_CURVED = 1, VR_SURFACE_SPHERE = 2 };
+enum VRDisplaySurface { VR_SURFACE_FLAT = 0, VR_SURFACE_CURVED = 1, VR_SURFACE_SPHERE = 2, VR_SURFACE_IMMERSIVE = 3 };
 
 XrFovf fov;
 XrView* projections;
@@ -161,7 +161,7 @@ static void ApplyCylinderCorrection(engine_t* engine, int fboIndex) {
     GL(glActiveTexture(GL_TEXTURE0));
     GL(glBindTexture(GL_TEXTURE_2D, renderer->StagingTexture[fboIndex]));
     GL(glUniform1i(cylinderCorrectionTexLoc, 0));
-    GL(glUniform1f(cylinderCorrectionAngleLoc, (float)(M_PI * 0.5)));
+    GL(glUniform1f(cylinderCorrectionAngleLoc, (float)(M_PI * 8.0 / 9.0)));
 
     GL(glDrawArrays(GL_TRIANGLES, 0, 3));
 
@@ -671,7 +671,7 @@ void VR_FinishFrame( engine_t* engine ) {
 
 		// Flat screen pose
 		float distance = VR_GetConfigFloat(VR_CONFIG_CANVAS_DISTANCE) / 4.0f - 1.0f;
-		float menuPitch = ToRadians(VR_GetConfigFloat(VR_CONFIG_MENU_PITCH));
+		float menuPitch = 0.0f; // Cinema screens always vertical (gravity-aligned)
 		float menuYaw = ToRadians(VR_GetConfigFloat(VR_CONFIG_MENU_YAW));
 		XrVector3f pos = {-sinf(menuYaw) * distance, 0, -cosf(menuYaw) * distance};
 		if (!VR_GetConfig(VR_CONFIG_CANVAS_6DOF)) {
@@ -711,8 +711,8 @@ void VR_FinishFrame( engine_t* engine ) {
 			cylinder_layer.pose.orientation = XrQuaternionf_Multiply(pitch, yaw);
 			cylinder_layer.pose.position = pos;
 			cylinder_layer.radius = 2.0f;
-			cylinder_layer.centralAngle = (float)(M_PI * 0.5);
-			cylinder_layer.aspectRatio = VR_GetConfigFloat(VR_CONFIG_CANVAS_ASPECT);
+			cylinder_layer.centralAngle = (float)(M_PI * 8.0 / 9.0);
+			cylinder_layer.aspectRatio = VR_GetConfigFloat(VR_CONFIG_CANVAS_ASPECT) * (16.0f / 9.0f);
 			if (headTracking && !reprojection) {
 				float width = (float)engine->appState.ViewConfigurationView[0].recommendedImageRectWidth;
 				float height = (float)engine->appState.ViewConfigurationView[0].recommendedImageRectHeight;

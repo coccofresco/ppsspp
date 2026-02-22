@@ -439,6 +439,9 @@ void LinkedShader::UpdateUniforms(const ShaderID &vsid, bool useBufferedRenderin
 				Matrix4x4 vrProjection;
 				if (flatScreen || is2D) {
 					memcpy(&vrProjection, gstate.projMatrix, 16 * sizeof(float));
+					if (!is2D && GetVRDisplaySurface() > 0) {
+						vrProjection.m[0] *= 0.5f;
+					}
 				} else {
 					UpdateVRProjection(gstate.projMatrix, vrProjection.m);
 				}

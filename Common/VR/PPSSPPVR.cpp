@@ -645,7 +645,7 @@ bool StartVRRender() {
 		M[11] = -1;
 		M[14] = -(nearZ + nearZ);
 		bool vrStereoActive = !PSP_CoreParameter().compat.vrCompat().ForceMono && g_Config.bEnableStereo && !IsBigScreenVRMode();
-		if (!vrStereoActive && (IsImmersiveVRMode() || VR_GetConfig(VR_CONFIG_ANTI_FLICKERING))) {
+		if (!vrStereoActive && VR_GetConfig(VR_CONFIG_ANTI_FLICKERING)) {
 			M[0] /= 2.0f;
 		}
 		memcpy(vrMatrix[VR_PROJECTION_MATRIX], M, sizeof(float) * 16);
@@ -675,9 +675,7 @@ bool StartVRRender() {
 		bool vrStereo = !PSP_CoreParameter().compat.vrCompat().ForceMono && g_Config.bEnableStereo;
 		if (!IsBigScreenVRMode() && (appMode == VR_GAME_MODE)) {
 			VR_SetConfig(VR_CONFIG_MODE, vrStereo ? VR_MODE_STEREO_6DOF : VR_MODE_MONO_6DOF);
-			// Stereo NEEDS projection layers (reprojection=1) for per-eye rendering.
-			// Non-stereo immersive uses quad layers (reprojection=0) for wide-FOV.
-			VR_SetConfig(VR_CONFIG_REPROJECTION, vrStereo ? 1 : (IsImmersiveVRMode() ? 0 : 1));
+			VR_SetConfig(VR_CONFIG_REPROJECTION, 1);
 			vrFlatGame = false;
 		} else if (appMode == VR_GAME_MODE) {
 			VR_SetConfig(VR_CONFIG_MODE, vrStereo ? VR_MODE_STEREO_SCREEN : VR_MODE_MONO_SCREEN);
@@ -697,7 +695,8 @@ bool StartVRRender() {
 		VR_SetConfigFloat(VR_CONFIG_FOV_SCALE, g_Config.fFieldOfViewPercentage / 100.0f);
 		VR_SetConfigFloat(VR_CONFIG_STEREO_INTENSITY, g_Config.fStereoIntensity / 100.0f);
 		VR_SetConfig(VR_CONFIG_CANVAS_6DOF, g_Config.bEnable6DoF);
-		VR_SetConfig(VR_CONFIG_DISPLAY_SURFACE, g_Config.iVRDisplaySurface);
+		VR_SetConfig(VR_CONFIG_DISPLAY_SURFACE,
+			(appMode == VR_GAME_MODE) ? g_Config.iVRDisplaySurface : 0);
 		VR_SetConfig(VR_CONFIG_PASSTHROUGH, g_Config.bPassthrough && IsPassthroughSupported());
 		return true;
 	}
@@ -722,6 +721,10 @@ void PreVRFrameRender(int fboIndex) {
 
 void PostVRFrameRender() {
 	VR_EndFrame(VR_GetEngine());
+}
+
+int GetVRDisplaySurface() {
+	return VR_GetConfig(VR_CONFIG_DISPLAY_SURFACE);
 }
 
 int GetVRFBOIndex() {
@@ -761,7 +764,7 @@ bool IsGameVRScene() {
 }
 
 bool IsImmersiveVRMode() {
-	return g_Config.bEnableImmersiveVR && !PSP_CoreParameter().compat.vrCompat().IdentityViewHack;
+	return (g_Config.iVRDisplaySurface == 3) && !PSP_CoreParameter().compat.vrCompat().IdentityViewHack;
 }
 
 bool Is2DVRObject(float* projMatrix, bool ortho) {
@@ -1018,7 +1021,7 @@ void UpdateVRViewMatrices() {
 
 		float intensity = g_Config.fStereoIntensity / 100.0f;
 
-		if (g_Config.bEnable6DoF && !flatScreen && IsVREnabled()) {
+		if (g_Config.bEnable6DoF && vrStereo && IsVREnabled()) {
 			headPos = vrView[0].pose.position;
 			// Scale head translations with stereo intensity so depth perception
 			// and head parallax stay perceptually consistent.

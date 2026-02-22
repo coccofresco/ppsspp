@@ -59,6 +59,7 @@ void FinishVRRender();
 void RecenterScreen();
 void PreVRFrameRender(int fboIndex);
 void PostVRFrameRender();
+int GetVRDisplaySurface();
 int GetVRFBOIndex();
 int GetVRPassesCount();
 bool IsPassthroughSupported();
