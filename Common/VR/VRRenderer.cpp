@@ -36,6 +36,146 @@ DECL_PFN(xrDestroyPassthroughLayerFB);
 DECL_PFN(xrPassthroughLayerPauseFB);
 DECL_PFN(xrPassthroughLayerResumeFB);
 
+// Cylinder correction shader globals
+static unsigned int cylinderCorrectionProgram = 0;
+static int cylinderCorrectionTexLoc = -1;
+static int cylinderCorrectionAngleLoc = -1;
+static bool cylinderCorrectionInitialized = false;
+static unsigned int cylinderCorrectionVAO = 0;
+
+#if XR_USE_GRAPHICS_API_OPENGL_ES || XR_USE_GRAPHICS_API_OPENGL
+
+static const char* cylinderCorrectionVS =
+    "#version 330 core\n"
+    "out vec2 vTexCoord;\n"
+    "void main() {\n"
+    "    vec2 pos = vec2(float((gl_VertexID & 1) << 2) - 1.0,\n"
+    "                   float((gl_VertexID & 2) << 1) - 1.0);\n"
+    "    vTexCoord = pos * 0.5 + 0.5;\n"
+    "    gl_Position = vec4(pos, 0.0, 1.0);\n"
+    "}\n";
+
+static const char* cylinderCorrectionFS =
+    "#version 330 core\n"
+    "uniform sampler2D uTexture;\n"
+    "uniform float uCentralAngle;\n"
+    "in vec2 vTexCoord;\n"
+    "out vec4 fragColor;\n"
+    "void main() {\n"
+    "    vec2 centered = vTexCoord - 0.5;\n"
+    "    float theta = centered.x * uCentralAngle;\n"
+    "    float halfAngle = uCentralAngle * 0.5;\n"
+    "    float perspX = tan(theta) / tan(halfAngle);\n"
+    "    float perspY = centered.y / cos(theta);\n"
+    "    vec2 correctedUV = vec2(perspX, perspY) * 0.5 + 0.5;\n"
+    "    if (correctedUV.x < 0.0 || correctedUV.x > 1.0 ||\n"
+    "        correctedUV.y < 0.0 || correctedUV.y > 1.0) {\n"
+    "        fragColor = vec4(0.0, 0.0, 0.0, 1.0);\n"
+    "    } else {\n"
+    "        fragColor = texture(uTexture, correctedUV);\n"
+    "    }\n"
+    "}\n";
+
+static void InitCylinderCorrectionShader() {
+    if (cylinderCorrectionInitialized) return;
+
+    GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vs, 1, &cylinderCorrectionVS, nullptr);
+    glCompileShader(vs);
+    GLint compiled = 0;
+    glGetShaderiv(vs, GL_COMPILE_STATUS, &compiled);
+    if (!compiled) {
+        char log[512];
+        glGetShaderInfoLog(vs, 512, nullptr, log);
+        VRLog("[CylinderCorrection] VS compile error:");
+        VRLog(log);
+    }
+
+    GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fs, 1, &cylinderCorrectionFS, nullptr);
+    glCompileShader(fs);
+    glGetShaderiv(fs, GL_COMPILE_STATUS, &compiled);
+    if (!compiled) {
+        char log[512];
+        glGetShaderInfoLog(fs, 512, nullptr, log);
+        VRLog("[CylinderCorrection] FS compile error:");
+        VRLog(log);
+    }
+
+    cylinderCorrectionProgram = glCreateProgram();
+    glAttachShader(cylinderCorrectionProgram, vs);
+    glAttachShader(cylinderCorrectionProgram, fs);
+    glLinkProgram(cylinderCorrectionProgram);
+    GLint linked = 0;
+    glGetProgramiv(cylinderCorrectionProgram, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        char log[512];
+        glGetProgramInfoLog(cylinderCorrectionProgram, 512, nullptr, log);
+        VRLog("[CylinderCorrection] Link error:");
+        VRLog(log);
+    }
+
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+
+    cylinderCorrectionTexLoc = glGetUniformLocation(cylinderCorrectionProgram, "uTexture");
+    cylinderCorrectionAngleLoc = glGetUniformLocation(cylinderCorrectionProgram, "uCentralAngle");
+
+    // Create a dummy VAO for vertex-less drawing (required by core profile)
+    GL(glGenVertexArrays(1, &cylinderCorrectionVAO));
+
+    cylinderCorrectionInitialized = true;
+    VRLog("[CylinderCorrection] Shader compiled and linked successfully");
+}
+
+static void ApplyCylinderCorrection(engine_t* engine, int fboIndex) {
+    if (!cylinderCorrectionInitialized) {
+        InitCylinderCorrectionShader();
+    }
+    if (cylinderCorrectionProgram == 0) return;
+
+    ovrRenderer* renderer = &engine->appState.Renderer;
+    ovrFramebuffer* fb = &renderer->FrameBuffer[fboIndex];
+
+    // Step 1: Blit swapchain FBO -> staging FBO
+    GL(glBindFramebuffer(GL_READ_FRAMEBUFFER, fb->GLFrameBuffers[fb->TextureSwapChainIndex]));
+    GL(glBindFramebuffer(GL_DRAW_FRAMEBUFFER, renderer->StagingFBO[fboIndex]));
+    GL(glBlitFramebuffer(0, 0, fb->ColorSwapChain.Width, fb->ColorSwapChain.Height,
+                         0, 0, renderer->StagingWidth, renderer->StagingHeight,
+                         GL_COLOR_BUFFER_BIT, GL_NEAREST));
+
+    // Step 2: Bind swapchain FBO as draw target
+    GL(glBindFramebuffer(GL_FRAMEBUFFER, fb->GLFrameBuffers[fb->TextureSwapChainIndex]));
+    GL(glViewport(0, 0, fb->ColorSwapChain.Width, fb->ColorSwapChain.Height));
+
+    // Step 3: Draw fullscreen triangle with correction shader
+    GLboolean depthTest = glIsEnabled(GL_DEPTH_TEST);
+    GLboolean blend = glIsEnabled(GL_BLEND);
+    GLboolean cullFace = glIsEnabled(GL_CULL_FACE);
+    GL(glDisable(GL_DEPTH_TEST));
+    GL(glDisable(GL_BLEND));
+    GL(glDisable(GL_CULL_FACE));
+
+    GL(glUseProgram(cylinderCorrectionProgram));
+    GL(glBindVertexArray(cylinderCorrectionVAO));
+    GL(glActiveTexture(GL_TEXTURE0));
+    GL(glBindTexture(GL_TEXTURE_2D, renderer->StagingTexture[fboIndex]));
+    GL(glUniform1i(cylinderCorrectionTexLoc, 0));
+    GL(glUniform1f(cylinderCorrectionAngleLoc, (float)(M_PI * 0.5)));
+
+    GL(glDrawArrays(GL_TRIANGLES, 0, 3));
+
+    // Restore state
+    GL(glBindVertexArray(0));
+    GL(glUseProgram(0));
+    GL(glBindTexture(GL_TEXTURE_2D, 0));
+    if (depthTest) GL(glEnable(GL_DEPTH_TEST));
+    if (blend) GL(glEnable(GL_BLEND));
+    if (cullFace) GL(glEnable(GL_CULL_FACE));
+}
+
+#endif
+
 void VR_UpdateStageBounds(ovrApp* pappState) {
 	XrExtent2Df stageBounds = {};
 
@@ -275,6 +415,17 @@ void VR_DestroyRenderer( engine_t* engine ) {
 		OXR(xrDestroyPassthroughFB(passthrough));
 		passthrough = XR_NULL_HANDLE;
 	}
+	if (cylinderCorrectionProgram != 0) {
+#if XR_USE_GRAPHICS_API_OPENGL_ES || XR_USE_GRAPHICS_API_OPENGL
+		glDeleteProgram(cylinderCorrectionProgram);
+		if (cylinderCorrectionVAO != 0) {
+			glDeleteVertexArrays(1, &cylinderCorrectionVAO);
+			cylinderCorrectionVAO = 0;
+		}
+#endif
+		cylinderCorrectionProgram = 0;
+		cylinderCorrectionInitialized = false;
+	}
 	ovrRenderer_Destroy(&engine->appState.Renderer);
 	free(projections);
 	initialized = false;
@@ -398,6 +549,13 @@ void VR_EndFrame( engine_t* engine ) {
 		}
 		ovrRenderer_StereoDebugWatermark(fboIndex);
 	}
+
+	// Apply cylinder correction shader for curved display surface
+#if XR_USE_GRAPHICS_API_OPENGL_ES || XR_USE_GRAPHICS_API_OPENGL
+	if (vrConfig[VR_CONFIG_DISPLAY_SURFACE] == VR_SURFACE_CURVED) {
+		ApplyCylinderCorrection(engine, fboIndex);
+	}
+#endif
 
 	ovrFramebuffer_Release(&engine->appState.Renderer.FrameBuffer[fboIndex]);
 }
