@@ -578,9 +578,12 @@ void VR_EndFrame( engine_t* engine ) {
 		ovrRenderer_StereoDebugWatermark(fboIndex);
 	}
 
-	// Apply cylinder correction shader for curved display surface
+	// Apply cylinder correction shader for curved/sphere display surfaces.
+	// Render FOV is set to exactly 160° (M[0] = 1/tan(80°)) to match the
+	// cylinder centralAngle, so the tan(theta) de-warp maps correctly.
 #if XR_USE_GRAPHICS_API_OPENGL_ES || XR_USE_GRAPHICS_API_OPENGL
-	if (vrConfig[VR_CONFIG_DISPLAY_SURFACE] == VR_SURFACE_CURVED) {
+	int displaySurface = vrConfig[VR_CONFIG_DISPLAY_SURFACE];
+	if (displaySurface == VR_SURFACE_CURVED || displaySurface == VR_SURFACE_SPHERE) {
 		ApplyCylinderCorrection(engine, fboIndex);
 	}
 #endif
@@ -697,6 +700,7 @@ void VR_FinishFrame( engine_t* engine ) {
 
 		if (actualSurface == VR_SURFACE_CURVED) {
 			// Cylinder layer for curved cinema screen (Quest Link, Pico, any runtime with cylinder support)
+			// Player is at the center of the cylinder, looking at the inner surface.
 			XrCompositionLayerCylinderKHR cylinder_layer = {};
 			cylinder_layer.type = XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR;
 			cylinder_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
@@ -709,10 +713,10 @@ void VR_FinishFrame( engine_t* engine ) {
 			cylinder_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Handle;
 			cylinder_layer.subImage.imageArrayIndex = 0;
 			cylinder_layer.pose.orientation = XrQuaternionf_Multiply(pitch, yaw);
-			cylinder_layer.pose.position = pos;
+			cylinder_layer.pose.position = invViewTransform[0].position;
 			cylinder_layer.radius = 2.0f;
 			cylinder_layer.centralAngle = (float)(M_PI * 8.0 / 9.0);
-			cylinder_layer.aspectRatio = VR_GetConfigFloat(VR_CONFIG_CANVAS_ASPECT) * (16.0f / 9.0f);
+			cylinder_layer.aspectRatio = VR_GetConfigFloat(VR_CONFIG_CANVAS_ASPECT);
 			if (headTracking && !reprojection) {
 				float width = (float)engine->appState.ViewConfigurationView[0].recommendedImageRectWidth;
 				float height = (float)engine->appState.ViewConfigurationView[0].recommendedImageRectHeight;
@@ -743,6 +747,7 @@ void VR_FinishFrame( engine_t* engine ) {
 			bool useEquirect2 = VR_GetPlatformFlag(VR_PLATFORM_EXTENSION_EQUIRECT2);
 
 			if (useEquirect2) {
+				// Player at center of sphere, looking at inner surface.
 				XrCompositionLayerEquirect2KHR equirect_layer = {};
 				equirect_layer.type = XR_TYPE_COMPOSITION_LAYER_EQUIRECT2_KHR;
 				equirect_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
@@ -754,7 +759,7 @@ void VR_FinishFrame( engine_t* engine ) {
 				equirect_layer.subImage.imageRect.extent.height = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Height;
 				equirect_layer.subImage.imageArrayIndex = 0;
 				equirect_layer.pose.orientation = XrQuaternionf_Multiply(pitch, yaw);
-				equirect_layer.pose.position = pos;
+				equirect_layer.pose.position = invViewTransform[0].position;
 				equirect_layer.radius = 2.0f;
 				if (headTracking && !reprojection) {
 					equirect_layer.centralHorizontalAngle = (float)(M_PI);
@@ -786,6 +791,7 @@ void VR_FinishFrame( engine_t* engine ) {
 				}
 			} else {
 				// Equirect v1 fallback (SteamVR and runtimes without equirect2)
+				// Player at center of sphere, looking at inner surface.
 				XrCompositionLayerEquirectKHR equirect_layer = {};
 				equirect_layer.type = XR_TYPE_COMPOSITION_LAYER_EQUIRECT_KHR;
 				equirect_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
@@ -797,7 +803,7 @@ void VR_FinishFrame( engine_t* engine ) {
 				equirect_layer.subImage.imageRect.extent.height = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Height;
 				equirect_layer.subImage.imageArrayIndex = 0;
 				equirect_layer.pose.orientation = XrQuaternionf_Multiply(pitch, yaw);
-				equirect_layer.pose.position = pos;
+				equirect_layer.pose.position = invViewTransform[0].position;
 				equirect_layer.radius = 2.0f;
 				equirect_layer.scale = {1.0f, 1.0f};
 				equirect_layer.bias = {0.0f, 0.0f};
