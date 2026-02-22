@@ -337,7 +337,57 @@ ovrRenderer
 void ovrRenderer_Clear(ovrRenderer* renderer) {
 	for (int i = 0; i < ovrMaxNumEyes; i++) {
 		ovrFramebuffer_Clear(&renderer->FrameBuffer[i]);
+		renderer->StagingTexture[i] = 0;
+		renderer->StagingFBO[i] = 0;
 	}
+	renderer->StagingWidth = 0;
+	renderer->StagingHeight = 0;
+}
+
+void ovrRenderer_CreateStagingFBO(ovrRenderer* renderer, int width, int height) {
+#if XR_USE_GRAPHICS_API_OPENGL_ES || XR_USE_GRAPHICS_API_OPENGL
+	renderer->StagingWidth = width;
+	renderer->StagingHeight = height;
+	for (int i = 0; i < ovrMaxNumEyes; i++) {
+		GL(glGenTextures(1, &renderer->StagingTexture[i]));
+		GL(glBindTexture(GL_TEXTURE_2D, renderer->StagingTexture[i]));
+		GL(glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr));
+		GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
+		GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
+		GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+		GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+
+		GL(glGenFramebuffers(1, &renderer->StagingFBO[i]));
+		GL(glBindFramebuffer(GL_FRAMEBUFFER, renderer->StagingFBO[i]));
+		GL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, renderer->StagingTexture[i], 0));
+		GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+		if (status != GL_FRAMEBUFFER_COMPLETE) {
+			char buf[128];
+			snprintf(buf, sizeof(buf), "[StagingFBO] Framebuffer %d incomplete: 0x%x", i, status);
+			VRLog(buf);
+		}
+	}
+	GL(glBindFramebuffer(GL_FRAMEBUFFER, 0));
+	GL(glBindTexture(GL_TEXTURE_2D, 0));
+	VRLog("[StagingFBO] Created staging FBOs for cylinder correction");
+#endif
+}
+
+void ovrRenderer_DestroyStagingFBO(ovrRenderer* renderer) {
+#if XR_USE_GRAPHICS_API_OPENGL_ES || XR_USE_GRAPHICS_API_OPENGL
+	for (int i = 0; i < ovrMaxNumEyes; i++) {
+		if (renderer->StagingFBO[i]) {
+			GL(glDeleteFramebuffers(1, &renderer->StagingFBO[i]));
+			renderer->StagingFBO[i] = 0;
+		}
+		if (renderer->StagingTexture[i]) {
+			GL(glDeleteTextures(1, &renderer->StagingTexture[i]));
+			renderer->StagingTexture[i] = 0;
+		}
+	}
+	renderer->StagingWidth = 0;
+	renderer->StagingHeight = 0;
+#endif
 }
 
 void ovrRenderer_Create(XrSession session, ovrRenderer* renderer, int width, int height) {
@@ -346,9 +396,11 @@ void ovrRenderer_Create(XrSession session, ovrRenderer* renderer, int width, int
 		ovrFramebuffer_CreateGL(session, &renderer->FrameBuffer[i], width, height);
 #endif
 	}
+	ovrRenderer_CreateStagingFBO(renderer, width, height);
 }
 
 void ovrRenderer_Destroy(ovrRenderer* renderer) {
+	ovrRenderer_DestroyStagingFBO(renderer);
 	for (int i = 0; i < ovrMaxNumEyes; i++) {
 		ovrFramebuffer_Destroy(&renderer->FrameBuffer[i]);
 	}

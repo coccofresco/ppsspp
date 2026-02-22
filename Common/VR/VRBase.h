@@ -81,6 +81,10 @@ typedef struct {
 
 typedef struct {
 	ovrFramebuffer FrameBuffer[ovrMaxNumEyes];
+	unsigned int StagingTexture[ovrMaxNumEyes];
+	unsigned int StagingFBO[ovrMaxNumEyes];
+	int StagingWidth;
+	int StagingHeight;
 } ovrRenderer;
 
 typedef struct {
