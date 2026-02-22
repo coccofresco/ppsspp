@@ -439,11 +439,12 @@ void LinkedShader::UpdateUniforms(const ShaderID &vsid, bool useBufferedRenderin
 				Matrix4x4 vrProjection;
 				if (flatScreen || is2D) {
 					memcpy(&vrProjection, gstate.projMatrix, 16 * sizeof(float));
-					if (!is2D && GetVRDisplaySurface() > 0 && GetVRDisplaySurface() < 3) {
-						float centralAngle = 160.0f * (float)M_PI / 180.0f;
-						vrProjection.m[0] = 1.0f / tanf(centralAngle * 0.5f);
-						vrProjection.m[5] = 2.0f * (480.0f / 272.0f) / centralAngle;
-					}
+					// M[0]/M[5] overrides disabled — testing if they have any effect
+					// if (!is2D && GetVRDisplaySurface() > 0 && GetVRDisplaySurface() < 3) {
+					// 	float centralAngle = 120.0f * (float)M_PI / 180.0f;
+					// 	vrProjection.m[0] = 1.0f / tanf(centralAngle * 0.5f);
+					// 	vrProjection.m[5] = 2.0f * (480.0f / 272.0f) / centralAngle;
+					// }
 				} else {
 					UpdateVRProjection(gstate.projMatrix, vrProjection.m);
 				}

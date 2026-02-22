@@ -161,7 +161,7 @@ static void ApplyCylinderCorrection(engine_t* engine, int fboIndex) {
     GL(glActiveTexture(GL_TEXTURE0));
     GL(glBindTexture(GL_TEXTURE_2D, renderer->StagingTexture[fboIndex]));
     GL(glUniform1i(cylinderCorrectionTexLoc, 0));
-    GL(glUniform1f(cylinderCorrectionAngleLoc, (float)(M_PI * 8.0 / 9.0)));
+    GL(glUniform1f(cylinderCorrectionAngleLoc, (float)(M_PI * 2.0 / 3.0)));
 
     GL(glDrawArrays(GL_TRIANGLES, 0, 3));
 
@@ -214,8 +214,10 @@ void VR_GetResolution(engine_t* engine, int *pWidth, int *pHeight) {
 
 		ALOGV("Available Viewport Configuration Types: %d", viewportConfigTypeCount);
 
+		VRLog("[VR_GetResolution] entering loop");
 		for (uint32_t i = 0; i < viewportConfigTypeCount; i++) {
 			const XrViewConfigurationType viewportConfigType = viewportConfigurationTypes[i];
+			VRLog("[VR_GetResolution] loop iteration");
 
 			ALOGV(
 					"Viewport configuration type %d : %s",
@@ -224,16 +226,20 @@ void VR_GetResolution(engine_t* engine, int *pWidth, int *pHeight) {
 
 			XrViewConfigurationProperties viewportConfig;
 			viewportConfig.type = XR_TYPE_VIEW_CONFIGURATION_PROPERTIES;
+			viewportConfig.next = NULL;
 			xrGetViewConfigurationProperties(
 					engine->appState.Instance, engine->appState.SystemId, viewportConfigType, &viewportConfig);
+			VRLog("[VR_GetResolution] xrGetViewConfigurationProperties OK");
 			ALOGV(
 					"FovMutable=%s ConfigurationType %d",
 					viewportConfig.fovMutable ? "true" : "false",
 					viewportConfig.viewConfigurationType);
 
-			uint32_t viewCount;
+			uint32_t viewCount = 0;
+			VRLog("[VR_GetResolution] enumerating views count...");
 			xrEnumerateViewConfigurationViews(
 					engine->appState.Instance, engine->appState.SystemId, viewportConfigType, 0, &viewCount, NULL);
+			VRLog("[VR_GetResolution] views count OK");
 
 			if (viewCount > 0) {
 				XrViewConfigurationView* elements =
@@ -244,6 +250,7 @@ void VR_GetResolution(engine_t* engine, int *pWidth, int *pHeight) {
 					elements[e].next = NULL;
 				}
 
+				VRLog("[VR_GetResolution] enumerating view details");
 				xrEnumerateViewConfigurationViews(
 						engine->appState.Instance,
 						engine->appState.SystemId,
@@ -251,10 +258,11 @@ void VR_GetResolution(engine_t* engine, int *pWidth, int *pHeight) {
 						viewCount,
 						&viewCount,
 						elements);
+				VRLog("[VR_GetResolution] view details OK");
 
 				// Cache the view config properties for the selected config type.
 				if (viewportConfigType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO) {
-					assert(viewCount == ovrMaxNumEyes);
+					VRLog("[VR_GetResolution] PRIMARY_STEREO found");
 					for (uint32_t e = 0; e < viewCount; e++) {
 						engine->appState.ViewConfigurationView[e] = elements[e];
 					}
@@ -715,7 +723,7 @@ void VR_FinishFrame( engine_t* engine ) {
 			cylinder_layer.pose.orientation = XrQuaternionf_Multiply(pitch, yaw);
 			cylinder_layer.pose.position = invViewTransform[0].position;
 			cylinder_layer.radius = 2.0f;
-			cylinder_layer.centralAngle = (float)(M_PI * 8.0 / 9.0);
+			cylinder_layer.centralAngle = (float)(M_PI * 2.0 / 3.0);
 			cylinder_layer.aspectRatio = VR_GetConfigFloat(VR_CONFIG_CANVAS_ASPECT);
 			if (headTracking && !reprojection) {
 				float width = (float)engine->appState.ViewConfigurationView[0].recommendedImageRectWidth;
