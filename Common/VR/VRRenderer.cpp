@@ -11,7 +11,7 @@
 
 extern void VRLog(const char* msg);
 
-enum VRDisplaySurface { VR_SURFACE_FLAT = 0, VR_SURFACE_CURVED = 1, VR_SURFACE_SPHERE = 2, VR_SURFACE_IMMERSIVE = 3 };
+enum VRDisplaySurface { VR_SURFACE_FLAT = 0, VR_SURFACE_CURVED = 1, VR_SURFACE_IMMERSIVE = 2 };
 
 XrFovf fov;
 XrView* projections;
@@ -36,145 +36,6 @@ DECL_PFN(xrDestroyPassthroughLayerFB);
 DECL_PFN(xrPassthroughLayerPauseFB);
 DECL_PFN(xrPassthroughLayerResumeFB);
 
-// Cylinder correction shader globals
-static unsigned int cylinderCorrectionProgram = 0;
-static int cylinderCorrectionTexLoc = -1;
-static int cylinderCorrectionAngleLoc = -1;
-static bool cylinderCorrectionInitialized = false;
-static unsigned int cylinderCorrectionVAO = 0;
-
-#if XR_USE_GRAPHICS_API_OPENGL_ES || XR_USE_GRAPHICS_API_OPENGL
-
-static const char* cylinderCorrectionVS =
-    "#version 330 core\n"
-    "out vec2 vTexCoord;\n"
-    "void main() {\n"
-    "    vec2 pos = vec2(float((gl_VertexID & 1) << 2) - 1.0,\n"
-    "                   float((gl_VertexID & 2) << 1) - 1.0);\n"
-    "    vTexCoord = pos * 0.5 + 0.5;\n"
-    "    gl_Position = vec4(pos, 0.0, 1.0);\n"
-    "}\n";
-
-static const char* cylinderCorrectionFS =
-    "#version 330 core\n"
-    "uniform sampler2D uTexture;\n"
-    "uniform float uCentralAngle;\n"
-    "in vec2 vTexCoord;\n"
-    "out vec4 fragColor;\n"
-    "void main() {\n"
-    "    vec2 centered = vTexCoord - 0.5;\n"
-    "    float theta = centered.x * uCentralAngle;\n"
-    "    float halfAngle = uCentralAngle * 0.5;\n"
-    "    float perspX = tan(theta) / tan(halfAngle);\n"
-    "    float perspY = centered.y / cos(theta);\n"
-    "    vec2 correctedUV = vec2(perspX, perspY) * 0.5 + 0.5;\n"
-    "    if (correctedUV.x < 0.0 || correctedUV.x > 1.0 ||\n"
-    "        correctedUV.y < 0.0 || correctedUV.y > 1.0) {\n"
-    "        fragColor = vec4(0.0, 0.0, 0.0, 1.0);\n"
-    "    } else {\n"
-    "        fragColor = texture(uTexture, correctedUV);\n"
-    "    }\n"
-    "}\n";
-
-static void InitCylinderCorrectionShader() {
-    if (cylinderCorrectionInitialized) return;
-
-    GLuint vs = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vs, 1, &cylinderCorrectionVS, nullptr);
-    glCompileShader(vs);
-    GLint compiled = 0;
-    glGetShaderiv(vs, GL_COMPILE_STATUS, &compiled);
-    if (!compiled) {
-        char log[512];
-        glGetShaderInfoLog(vs, 512, nullptr, log);
-        VRLog("[CylinderCorrection] VS compile error:");
-        VRLog(log);
-    }
-
-    GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fs, 1, &cylinderCorrectionFS, nullptr);
-    glCompileShader(fs);
-    glGetShaderiv(fs, GL_COMPILE_STATUS, &compiled);
-    if (!compiled) {
-        char log[512];
-        glGetShaderInfoLog(fs, 512, nullptr, log);
-        VRLog("[CylinderCorrection] FS compile error:");
-        VRLog(log);
-    }
-
-    cylinderCorrectionProgram = glCreateProgram();
-    glAttachShader(cylinderCorrectionProgram, vs);
-    glAttachShader(cylinderCorrectionProgram, fs);
-    glLinkProgram(cylinderCorrectionProgram);
-    GLint linked = 0;
-    glGetProgramiv(cylinderCorrectionProgram, GL_LINK_STATUS, &linked);
-    if (!linked) {
-        char log[512];
-        glGetProgramInfoLog(cylinderCorrectionProgram, 512, nullptr, log);
-        VRLog("[CylinderCorrection] Link error:");
-        VRLog(log);
-    }
-
-    glDeleteShader(vs);
-    glDeleteShader(fs);
-
-    cylinderCorrectionTexLoc = glGetUniformLocation(cylinderCorrectionProgram, "uTexture");
-    cylinderCorrectionAngleLoc = glGetUniformLocation(cylinderCorrectionProgram, "uCentralAngle");
-
-    // Create a dummy VAO for vertex-less drawing (required by core profile)
-    GL(glGenVertexArrays(1, &cylinderCorrectionVAO));
-
-    cylinderCorrectionInitialized = true;
-    VRLog("[CylinderCorrection] Shader compiled and linked successfully");
-}
-
-static void ApplyCylinderCorrection(engine_t* engine, int fboIndex) {
-    if (!cylinderCorrectionInitialized) {
-        InitCylinderCorrectionShader();
-    }
-    if (cylinderCorrectionProgram == 0) return;
-
-    ovrRenderer* renderer = &engine->appState.Renderer;
-    ovrFramebuffer* fb = &renderer->FrameBuffer[fboIndex];
-
-    // Step 1: Blit swapchain FBO -> staging FBO
-    GL(glBindFramebuffer(GL_READ_FRAMEBUFFER, fb->GLFrameBuffers[fb->TextureSwapChainIndex]));
-    GL(glBindFramebuffer(GL_DRAW_FRAMEBUFFER, renderer->StagingFBO[fboIndex]));
-    GL(glBlitFramebuffer(0, 0, fb->ColorSwapChain.Width, fb->ColorSwapChain.Height,
-                         0, 0, renderer->StagingWidth, renderer->StagingHeight,
-                         GL_COLOR_BUFFER_BIT, GL_NEAREST));
-
-    // Step 2: Bind swapchain FBO as draw target
-    GL(glBindFramebuffer(GL_FRAMEBUFFER, fb->GLFrameBuffers[fb->TextureSwapChainIndex]));
-    GL(glViewport(0, 0, fb->ColorSwapChain.Width, fb->ColorSwapChain.Height));
-
-    // Step 3: Draw fullscreen triangle with correction shader
-    GLboolean depthTest = glIsEnabled(GL_DEPTH_TEST);
-    GLboolean blend = glIsEnabled(GL_BLEND);
-    GLboolean cullFace = glIsEnabled(GL_CULL_FACE);
-    GL(glDisable(GL_DEPTH_TEST));
-    GL(glDisable(GL_BLEND));
-    GL(glDisable(GL_CULL_FACE));
-
-    GL(glUseProgram(cylinderCorrectionProgram));
-    GL(glBindVertexArray(cylinderCorrectionVAO));
-    GL(glActiveTexture(GL_TEXTURE0));
-    GL(glBindTexture(GL_TEXTURE_2D, renderer->StagingTexture[fboIndex]));
-    GL(glUniform1i(cylinderCorrectionTexLoc, 0));
-    GL(glUniform1f(cylinderCorrectionAngleLoc, (float)(M_PI * 2.0 / 3.0)));
-
-    GL(glDrawArrays(GL_TRIANGLES, 0, 3));
-
-    // Restore state
-    GL(glBindVertexArray(0));
-    GL(glUseProgram(0));
-    GL(glBindTexture(GL_TEXTURE_2D, 0));
-    if (depthTest) GL(glEnable(GL_DEPTH_TEST));
-    if (blend) GL(glEnable(GL_BLEND));
-    if (cullFace) GL(glEnable(GL_CULL_FACE));
-}
-
-#endif
 
 void VR_UpdateStageBounds(ovrApp* pappState) {
 	XrExtent2Df stageBounds = {};
@@ -439,17 +300,6 @@ void VR_DestroyRenderer( engine_t* engine ) {
 		OXR(xrDestroyPassthroughFB(passthrough));
 		passthrough = XR_NULL_HANDLE;
 	}
-	if (cylinderCorrectionProgram != 0) {
-#if XR_USE_GRAPHICS_API_OPENGL_ES || XR_USE_GRAPHICS_API_OPENGL
-		glDeleteProgram(cylinderCorrectionProgram);
-		if (cylinderCorrectionVAO != 0) {
-			glDeleteVertexArrays(1, &cylinderCorrectionVAO);
-			cylinderCorrectionVAO = 0;
-		}
-#endif
-		cylinderCorrectionProgram = 0;
-		cylinderCorrectionInitialized = false;
-	}
 	ovrRenderer_Destroy(&engine->appState.Renderer);
 	free(projections);
 	initialized = false;
@@ -586,16 +436,6 @@ void VR_EndFrame( engine_t* engine ) {
 		ovrRenderer_StereoDebugWatermark(fboIndex);
 	}
 
-	// Apply cylinder correction shader for curved/sphere display surfaces.
-	// Render FOV is set to exactly 160° (M[0] = 1/tan(80°)) to match the
-	// cylinder centralAngle, so the tan(theta) de-warp maps correctly.
-#if XR_USE_GRAPHICS_API_OPENGL_ES || XR_USE_GRAPHICS_API_OPENGL
-	int displaySurface = vrConfig[VR_CONFIG_DISPLAY_SURFACE];
-	if (displaySurface == VR_SURFACE_CURVED || displaySurface == VR_SURFACE_SPHERE) {
-		ApplyCylinderCorrection(engine, fboIndex);
-	}
-#endif
-
 	ovrFramebuffer_Release(&engine->appState.Renderer.FrameBuffer[fboIndex]);
 }
 
@@ -696,12 +536,7 @@ void VR_FinishFrame( engine_t* engine ) {
 		// Determine display surface with graceful fallback chain
 		int requestedSurface = vrConfig[VR_CONFIG_DISPLAY_SURFACE];
 		int actualSurface = requestedSurface;
-		// Fallback: Sphere -> Curved -> Flat
-		if (actualSurface == VR_SURFACE_SPHERE &&
-		    !VR_GetPlatformFlag(VR_PLATFORM_EXTENSION_EQUIRECT2) &&
-		    !VR_GetPlatformFlag(VR_PLATFORM_EXTENSION_EQUIRECT)) {
-			actualSurface = VR_SURFACE_CURVED;
-		}
+		// Fallback: Curved -> Flat
 		if (actualSurface == VR_SURFACE_CURVED && !VR_GetPlatformFlag(VR_PLATFORM_EXTENSION_CYLINDER)) {
 			actualSurface = VR_SURFACE_FLAT;
 		}
@@ -723,8 +558,13 @@ void VR_FinishFrame( engine_t* engine ) {
 			cylinder_layer.pose.orientation = XrQuaternionf_Multiply(pitch, yaw);
 			cylinder_layer.pose.position = invViewTransform[0].position;
 			cylinder_layer.radius = 2.0f;
-			cylinder_layer.centralAngle = (float)(M_PI * 2.0 / 3.0);
-			cylinder_layer.aspectRatio = VR_GetConfigFloat(VR_CONFIG_CANVAS_ASPECT);
+			float fovScale = VR_GetConfigFloat(VR_CONFIG_FOV_SCALE);
+			float baseCentralAngle = (float)(M_PI * 2.0 / 3.0);  // 120deg base
+			float centralAngle = baseCentralAngle * fovScale;
+			if (centralAngle > (float)(M_PI * 3.0 / 2.0)) centralAngle = (float)(M_PI * 3.0 / 2.0);
+			cylinder_layer.centralAngle = centralAngle;
+			// Content rendered with 2x*fovScale wider FOV, so cylinder must be proportionally wider
+			cylinder_layer.aspectRatio = VR_GetConfigFloat(VR_CONFIG_CANVAS_ASPECT) * 2.0f * fovScale;
 			if (headTracking && !reprojection) {
 				float width = (float)engine->appState.ViewConfigurationView[0].recommendedImageRectWidth;
 				float height = (float)engine->appState.ViewConfigurationView[0].recommendedImageRectHeight;
@@ -749,91 +589,6 @@ void VR_FinishFrame( engine_t* engine ) {
 				cylinder_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
 				cylinder_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[1].ColorSwapChain.Handle;
 				engine->appState.Layers[engine->appState.LayerCount++].Cylinder = cylinder_layer;
-			}
-		} else if (actualSurface == VR_SURFACE_SPHERE) {
-			// Equirect layer for spherical cinema screen
-			bool useEquirect2 = VR_GetPlatformFlag(VR_PLATFORM_EXTENSION_EQUIRECT2);
-
-			if (useEquirect2) {
-				// Player at center of sphere, looking at inner surface.
-				XrCompositionLayerEquirect2KHR equirect_layer = {};
-				equirect_layer.type = XR_TYPE_COMPOSITION_LAYER_EQUIRECT2_KHR;
-				equirect_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
-				equirect_layer.space = engine->appState.CurrentSpace;
-				equirect_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Handle;
-				equirect_layer.subImage.imageRect.offset.x = 0;
-				equirect_layer.subImage.imageRect.offset.y = 0;
-				equirect_layer.subImage.imageRect.extent.width = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Width;
-				equirect_layer.subImage.imageRect.extent.height = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Height;
-				equirect_layer.subImage.imageArrayIndex = 0;
-				equirect_layer.pose.orientation = XrQuaternionf_Multiply(pitch, yaw);
-				equirect_layer.pose.position = invViewTransform[0].position;
-				equirect_layer.radius = 2.0f;
-				if (headTracking && !reprojection) {
-					equirect_layer.centralHorizontalAngle = (float)(M_PI);
-					equirect_layer.upperVerticalAngle = (float)(M_PI * 0.4);
-					equirect_layer.lowerVerticalAngle = -(float)(M_PI * 0.4);
-				} else {
-					equirect_layer.centralHorizontalAngle = (float)(M_PI * 0.5);
-					equirect_layer.upperVerticalAngle = (float)(M_PI * 0.25);
-					equirect_layer.lowerVerticalAngle = -(float)(M_PI * 0.25);
-				}
-
-				// Build the equirect2 layer
-				if ((vrMode == VR_MODE_MONO_SCREEN) || (vrMode == VR_MODE_MONO_6DOF)) {
-					equirect_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
-					engine->appState.Layers[engine->appState.LayerCount++].Equirect2 = equirect_layer;
-				} else if ((vrMode == VR_MODE_SBS_SCREEN) || (vrMode == VR_MODE_SBS_6DOF)) {
-					equirect_layer.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
-					equirect_layer.subImage.imageRect.extent.width /= 2;
-					engine->appState.Layers[engine->appState.LayerCount++].Equirect2 = equirect_layer;
-					equirect_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
-					equirect_layer.subImage.imageRect.offset.x += equirect_layer.subImage.imageRect.extent.width;
-					engine->appState.Layers[engine->appState.LayerCount++].Equirect2 = equirect_layer;
-				} else {
-					equirect_layer.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
-					engine->appState.Layers[engine->appState.LayerCount++].Equirect2 = equirect_layer;
-					equirect_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
-					equirect_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[1].ColorSwapChain.Handle;
-					engine->appState.Layers[engine->appState.LayerCount++].Equirect2 = equirect_layer;
-				}
-			} else {
-				// Equirect v1 fallback (SteamVR and runtimes without equirect2)
-				// Player at center of sphere, looking at inner surface.
-				XrCompositionLayerEquirectKHR equirect_layer = {};
-				equirect_layer.type = XR_TYPE_COMPOSITION_LAYER_EQUIRECT_KHR;
-				equirect_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
-				equirect_layer.space = engine->appState.CurrentSpace;
-				equirect_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Handle;
-				equirect_layer.subImage.imageRect.offset.x = 0;
-				equirect_layer.subImage.imageRect.offset.y = 0;
-				equirect_layer.subImage.imageRect.extent.width = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Width;
-				equirect_layer.subImage.imageRect.extent.height = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Height;
-				equirect_layer.subImage.imageArrayIndex = 0;
-				equirect_layer.pose.orientation = XrQuaternionf_Multiply(pitch, yaw);
-				equirect_layer.pose.position = invViewTransform[0].position;
-				equirect_layer.radius = 2.0f;
-				equirect_layer.scale = {1.0f, 1.0f};
-				equirect_layer.bias = {0.0f, 0.0f};
-
-				// Build the equirect v1 layer
-				if ((vrMode == VR_MODE_MONO_SCREEN) || (vrMode == VR_MODE_MONO_6DOF)) {
-					equirect_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
-					engine->appState.Layers[engine->appState.LayerCount++].Equirect = equirect_layer;
-				} else if ((vrMode == VR_MODE_SBS_SCREEN) || (vrMode == VR_MODE_SBS_6DOF)) {
-					equirect_layer.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
-					equirect_layer.subImage.imageRect.extent.width /= 2;
-					engine->appState.Layers[engine->appState.LayerCount++].Equirect = equirect_layer;
-					equirect_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
-					equirect_layer.subImage.imageRect.offset.x += equirect_layer.subImage.imageRect.extent.width;
-					engine->appState.Layers[engine->appState.LayerCount++].Equirect = equirect_layer;
-				} else {
-					equirect_layer.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
-					engine->appState.Layers[engine->appState.LayerCount++].Equirect = equirect_layer;
-					equirect_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
-					equirect_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[1].ColorSwapChain.Handle;
-					engine->appState.Layers[engine->appState.LayerCount++].Equirect = equirect_layer;
-				}
 			}
 		} else {
 			// Quad layer for flat cinema screen (default, SteamVR and runtimes without cylinder/equirect)

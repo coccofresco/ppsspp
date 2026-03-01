@@ -16,7 +16,7 @@ enum VRConfig {
 	VR_CONFIG_ANTI_FLICKERING,
 	//depth submission
 	VR_CONFIG_DEPTH_SUBMIT,
-	//display surface type (0=Flat/Quad, 1=Curved/Cylinder, 2=Sphere/Equirect)
+	//display surface type (0=Flat/Quad, 1=Curved/Cylinder, 2=Immersive)
 	VR_CONFIG_DISPLAY_SURFACE,
 
 	//end

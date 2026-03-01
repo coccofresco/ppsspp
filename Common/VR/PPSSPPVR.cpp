@@ -764,7 +764,7 @@ bool IsGameVRScene() {
 }
 
 bool IsImmersiveVRMode() {
-	return (g_Config.iVRDisplaySurface == 3) && !PSP_CoreParameter().compat.vrCompat().IdentityViewHack;
+	return (g_Config.iVRDisplaySurface == 2) && !PSP_CoreParameter().compat.vrCompat().IdentityViewHack;
 }
 
 bool Is2DVRObject(float* projMatrix, bool ortho) {
@@ -852,7 +852,14 @@ void UpdateVRProjection(float* projMatrix, float* output) {
 			output[i] = 0;
 		}
 	}
-	output[11] *= g_Config.fFieldOfViewPercentage / 100.0f;
+	// Cinema curved: fixed 2x FOV base, UI slider multiplies on top
+	if (IsBigScreenVRMode() && VR_GetConfig(VR_CONFIG_DISPLAY_SURFACE) == 1 /*VR_SURFACE_CURVED*/) {
+		float fovMult = 2.0f * g_Config.fFieldOfViewPercentage / 100.0f;
+		output[0] /= fovMult;
+	}
+	if (!IsBigScreenVRMode()) {
+		output[11] *= g_Config.fFieldOfViewPercentage / 100.0f;
+	}
 }
 
 void UpdateVRProjectionStereo(float* projMatrix, float* leftOutput, float* rightOutput) {
@@ -877,7 +884,14 @@ void UpdateVRProjectionStereo(float* projMatrix, float* leftOutput, float* right
 				outputs[eye][i] = 0;
 			}
 		}
-		outputs[eye][11] *= g_Config.fFieldOfViewPercentage / 100.0f;
+		// Cinema curved: fixed 2x FOV base, UI slider multiplies on top
+		if (IsBigScreenVRMode() && VR_GetConfig(VR_CONFIG_DISPLAY_SURFACE) == 1 /*VR_SURFACE_CURVED*/) {
+			float fovMult = 2.0f * g_Config.fFieldOfViewPercentage / 100.0f;
+			outputs[eye][0] /= fovMult;
+		}
+		if (!IsBigScreenVRMode()) {
+			outputs[eye][11] *= g_Config.fFieldOfViewPercentage / 100.0f;
+		}
 	}
 }
 
