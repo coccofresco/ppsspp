@@ -229,25 +229,44 @@ static void RenderCylinderScreen(int fboIndex, engine_t* engine) {
 	int w = fb->Width, h = fb->Height;
 	GLuint swapchainFBO = fb->GLFrameBuffers[fb->TextureSwapChainIndex];
 
-	// Get the swapchain color texture — this IS the game content rendered by PPSSPP
-	GLuint gameTexture = ((VR_GL_SWAPCHAIN_IMAGE*)fb->ColorSwapChainImage)[fb->TextureSwapChainIndex].image;
+	// Save GL state (q3vr pattern)
+	GLuint prevVAO, prevProgram, prevTexture;
+	glGetIntegerv(GL_VERTEX_ARRAY_BINDING, (GLint*)&prevVAO);
+	glGetIntegerv(GL_CURRENT_PROGRAM, (GLint*)&prevProgram);
+	glGetIntegerv(GL_TEXTURE_BINDING_2D, (GLint*)&prevTexture);
+	GLboolean prevBlend = glIsEnabled(GL_BLEND);
+	GLboolean prevDepthTest = glIsEnabled(GL_DEPTH_TEST);
+	GLboolean prevCullFace = glIsEnabled(GL_CULL_FACE);
+	GLboolean prevScissor = glIsEnabled(GL_SCISSOR_TEST);
+	GLboolean prevStencil = glIsEnabled(GL_STENCIL_TEST);
+	GLboolean prevSRGB = glIsEnabled(GL_FRAMEBUFFER_SRGB);
+	GLboolean prevDepthMask;
+	glGetBooleanv(GL_DEPTH_WRITEMASK, &prevDepthMask);
 
-	// 1. Clear staging FBO (black background around the cylinder)
-	GL(glBindFramebuffer(GL_FRAMEBUFFER, renderer->StagingFBO[fboIndex]));
-	GL(glViewport(0, 0, renderer->StagingWidth, renderer->StagingHeight));
+	// Disable sRGB conversions — raw byte passthrough, no precision loss
+	GL(glDisable(GL_FRAMEBUFFER_SRGB));
+
+	// 1. Copy game content swapchain → staging texture (raw byte copy, no sRGB conversion)
+	GL(glBindFramebuffer(GL_READ_FRAMEBUFFER, swapchainFBO));
+	GL(glBindFramebuffer(GL_DRAW_FRAMEBUFFER, renderer->StagingFBO[fboIndex]));
+	GL(glBlitFramebuffer(0, 0, w, h, 0, 0, renderer->StagingWidth, renderer->StagingHeight, GL_COLOR_BUFFER_BIT, GL_LINEAR));
+
+	// 2. Draw directly on swapchain FBO (like q3vr — no staging render)
+	GL(glBindFramebuffer(GL_FRAMEBUFFER, swapchainFBO));
+	GL(glViewport(0, 0, w, h));
 	GL(glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE));
 	GL(glClearColor(0.0f, 0.0f, 0.0f, 1.0f));
 	GL(glClear(GL_COLOR_BUFFER_BIT));
 
-	// 2. GL state for cylinder draw
+	// 3. GL state for cylinder draw
 	GL(glDisable(GL_DEPTH_TEST));
+	GL(glDepthMask(GL_FALSE));
 	GL(glDisable(GL_BLEND));
 	GL(glDisable(GL_CULL_FACE));
 	GL(glDisable(GL_SCISSOR_TEST));
 	GL(glDisable(GL_STENCIL_TEST));
 
-	// 3. Build MVP matrices
-	// Model: cylinder center at viewer's head position, rotated by menuYaw
+	// 4. Build MVP matrices
 	float menuYaw = ToRadians(VR_GetConfigFloat(VR_CONFIG_MENU_YAW));
 	XrMatrix4x4f model, translation, rotation;
 	XrVector3f cylinderCenter = invViewTransform[0].position;
@@ -258,12 +277,10 @@ static void RenderCylinderScreen(int fboIndex, engine_t* engine) {
 	XrMatrix4x4f_CreateRotation(&rotation, 0.0f, menuYaw * 180.0f / (float)M_PI, 0.0f);
 	XrMatrix4x4f_Multiply(&model, &translation, &rotation);
 
-	// View: inverse of eye pose
 	XrMatrix4x4f eyePose, view;
 	XrMatrix4x4f_CreateFromRigidTransform(&eyePose, &invViewTransform[fboIndex]);
 	XrMatrix4x4f_InvertRigidBody(&view, &eyePose);
 
-	// Projection: from eye's actual FOV
 #if XR_USE_GRAPHICS_API_OPENGL_ES
 	GraphicsAPI gfxApi = GRAPHICS_OPENGL_ES;
 #else
@@ -272,35 +289,31 @@ static void RenderCylinderScreen(int fboIndex, engine_t* engine) {
 	XrMatrix4x4f proj;
 	XrMatrix4x4f_CreateProjectionFov(&proj, gfxApi, projections[fboIndex].fov, 0.1f, 100.0f);
 
-	// 4. Draw cylinder mesh with game texture
+	// 5. Draw cylinder on swapchain, sampling from staging texture
 	GL(glUseProgram(cylinderProgram));
 	GL(glUniformMatrix4fv(cylUniformModel, 1, GL_FALSE, (float*)model.m));
 	GL(glUniformMatrix4fv(cylUniformView, 1, GL_FALSE, (float*)view.m));
 	GL(glUniformMatrix4fv(cylUniformProj, 1, GL_FALSE, (float*)proj.m));
 
 	GL(glActiveTexture(GL_TEXTURE0));
-	GL(glBindTexture(GL_TEXTURE_2D, gameTexture));
+	GL(glBindTexture(GL_TEXTURE_2D, renderer->StagingTexture[fboIndex]));
 	GL(glUniform1i(cylUniformTex, 0));
 
 	GL(glBindVertexArray(cylinderVAO));
 	GL(glDrawElements(GL_TRIANGLES, cylinderIndexCount, GL_UNSIGNED_INT, 0));
 	GL(glBindVertexArray(0));
 
-	GL(glBindTexture(GL_TEXTURE_2D, 0));
-	GL(glUseProgram(0));
-
-	// 5. Blit staging (linear RGBA8) → swapchain (SRGB8_ALPHA8)
-	// Must enable GL_FRAMEBUFFER_SRGB so the blit encodes linear→sRGB.
-	// Without this, linear values are stored directly in sRGB texture,
-	// and the runtime decodes them again → double gamma → too dark.
-	GL(glEnable(GL_FRAMEBUFFER_SRGB));
-	GL(glBindFramebuffer(GL_READ_FRAMEBUFFER, renderer->StagingFBO[fboIndex]));
-	GL(glBindFramebuffer(GL_DRAW_FRAMEBUFFER, swapchainFBO));
-	GL(glBlitFramebuffer(0, 0, renderer->StagingWidth, renderer->StagingHeight, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_LINEAR));
-	GL(glDisable(GL_FRAMEBUFFER_SRGB));
-
-	// Restore swapchain FBO binding
-	GL(glBindFramebuffer(GL_FRAMEBUFFER, swapchainFBO));
+	// Restore GL state
+	if (prevSRGB) { GL(glEnable(GL_FRAMEBUFFER_SRGB)); }
+	if (prevBlend) { GL(glEnable(GL_BLEND)); }
+	if (prevDepthTest) { GL(glEnable(GL_DEPTH_TEST)); }
+	if (prevCullFace) { GL(glEnable(GL_CULL_FACE)); }
+	if (prevScissor) { GL(glEnable(GL_SCISSOR_TEST)); }
+	if (prevStencil) { GL(glEnable(GL_STENCIL_TEST)); }
+	if (prevDepthMask) { GL(glDepthMask(GL_TRUE)); }
+	GL(glBindTexture(GL_TEXTURE_2D, prevTexture));
+	GL(glBindVertexArray(prevVAO));
+	GL(glUseProgram(prevProgram));
 }
 
 #endif // XR_USE_GRAPHICS_API_OPENGL || XR_USE_GRAPHICS_API_OPENGL_ES
