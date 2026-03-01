@@ -696,7 +696,7 @@ bool StartVRRender() {
 		VR_SetConfigFloat(VR_CONFIG_STEREO_INTENSITY, g_Config.fStereoIntensity / 100.0f);
 		VR_SetConfig(VR_CONFIG_CANVAS_6DOF, g_Config.bEnable6DoF);
 		VR_SetConfig(VR_CONFIG_DISPLAY_SURFACE,
-			(appMode == VR_GAME_MODE) ? g_Config.iVRDisplaySurface : 0);
+			(appMode == VR_GAME_MODE) ? g_Config.iVRDisplaySurface : VR_SURFACE_FLAT);
 		VR_SetConfig(VR_CONFIG_PASSTHROUGH, g_Config.bPassthrough && IsPassthroughSupported());
 		return true;
 	}
@@ -764,7 +764,7 @@ bool IsGameVRScene() {
 }
 
 bool IsImmersiveVRMode() {
-	return (g_Config.iVRDisplaySurface == 2) && !PSP_CoreParameter().compat.vrCompat().IdentityViewHack;
+	return (g_Config.iVRDisplaySurface == VR_SURFACE_IMMERSIVE) && !PSP_CoreParameter().compat.vrCompat().IdentityViewHack;
 }
 
 bool Is2DVRObject(float* projMatrix, bool ortho) {
@@ -853,7 +853,7 @@ void UpdateVRProjection(float* projMatrix, float* output) {
 		}
 	}
 	// Cinema curved: fixed 2x FOV base, UI slider multiplies on top
-	if (IsBigScreenVRMode() && VR_GetConfig(VR_CONFIG_DISPLAY_SURFACE) == 1 /*VR_SURFACE_CURVED*/) {
+	if (IsBigScreenVRMode() && VR_GetConfig(VR_CONFIG_DISPLAY_SURFACE) == VR_SURFACE_CURVED) {
 		float fovMult = 2.0f * g_Config.fFieldOfViewPercentage / 100.0f;
 		output[0] /= fovMult;
 		output[5] /= fovMult;
@@ -886,7 +886,7 @@ void UpdateVRProjectionStereo(float* projMatrix, float* leftOutput, float* right
 			}
 		}
 		// Cinema curved: fixed 2x FOV base, UI slider multiplies on top
-		if (IsBigScreenVRMode() && VR_GetConfig(VR_CONFIG_DISPLAY_SURFACE) == 1 /*VR_SURFACE_CURVED*/) {
+		if (IsBigScreenVRMode() && VR_GetConfig(VR_CONFIG_DISPLAY_SURFACE) == VR_SURFACE_CURVED) {
 			float fovMult = 2.0f * g_Config.fFieldOfViewPercentage / 100.0f;
 			outputs[eye][0] /= fovMult;
 			outputs[eye][5] /= fovMult;
