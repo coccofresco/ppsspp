@@ -20,8 +20,6 @@
 
 extern void VRLog(const char* msg);
 
-enum VRDisplaySurface { VR_SURFACE_FLAT = 0, VR_SURFACE_CURVED = 1, VR_SURFACE_IMMERSIVE = 2 };
-
 #if XR_USE_GRAPHICS_API_OPENGL || XR_USE_GRAPHICS_API_OPENGL_ES
 static GLuint cylinderVAO = 0, cylinderVBO = 0, cylinderEBO = 0;
 static int cylinderIndexCount = 0;
@@ -70,12 +68,14 @@ static void GenerateCylinderMesh(float radius, float height, float arcAngle, int
 
 	float startAngle = -arcAngle * 0.5f;
 	float dTheta = arcAngle / (float)segments;
+	float halfArc = arcAngle * 0.5f;
+	float tanHalfArc = tanf(halfArc);
 
 	for (int i = 0; i <= segments; i++) {
 		float theta = startAngle + i * dTheta;
 		float x = radius * sinf(theta);
 		float z = -radius * cosf(theta);
-		float u = (float)i / (float)segments;
+		float u = (tanf(theta) / tanHalfArc + 1.0f) * 0.5f;
 
 		// Top vertex
 		*vptr++ = x; *vptr++ = height * 0.5f; *vptr++ = z;

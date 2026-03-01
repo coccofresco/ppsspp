@@ -48,6 +48,12 @@ enum VRMode {
 	VR_MODE_STEREO_6DOF
 };
 
+enum VRDisplaySurface {
+	VR_SURFACE_FLAT = 0,
+	VR_SURFACE_CURVED = 1,
+	VR_SURFACE_IMMERSIVE = 2
+};
+
 void VR_GetResolution( engine_t* engine, int *pWidth, int *pHeight );
 void VR_Recenter( engine_t* engine );
 void VR_InitRenderer( engine_t* engine );
