@@ -24,8 +24,9 @@ extern void VRLog(const char* msg);
 static GLuint cylinderVAO = 0, cylinderVBO = 0, cylinderEBO = 0;
 static int cylinderIndexCount = 0;
 static GLuint cylinderProgram = 0;
-static GLint cylUniformModel = -1, cylUniformView = -1, cylUniformProj = -1, cylUniformTex = -1;
+static GLint cylUniformModel = -1, cylUniformView = -1, cylUniformProj = -1, cylUniformTex = -1, cylUniformHalfHeight = -1;
 static bool cylinderMeshReady = false;
+static float cylinderHalfHeight = 0.0f;
 #endif
 
 XrFovf fov;
@@ -68,14 +69,12 @@ static void GenerateCylinderMesh(float radius, float height, float arcAngle, int
 
 	float startAngle = -arcAngle * 0.5f;
 	float dTheta = arcAngle / (float)segments;
-	float halfArc = arcAngle * 0.5f;
-	float tanHalfArc = tanf(halfArc);
 
 	for (int i = 0; i <= segments; i++) {
 		float theta = startAngle + i * dTheta;
 		float x = radius * sinf(theta);
 		float z = -radius * cosf(theta);
-		float u = (tanf(theta) / tanHalfArc + 1.0f) * 0.5f;
+		float u = (float)i / (float)segments;
 
 		// Top vertex
 		*vptr++ = x; *vptr++ = height * 0.5f; *vptr++ = z;
@@ -141,21 +140,31 @@ static void InitCylinderShader() {
 		"layout(location=0) in vec3 aPos;\n"
 		"layout(location=1) in vec2 aUV;\n"
 		"out vec2 vUV;\n"
+		"out vec3 vLocalPos;\n"
 		"uniform mat4 uModel;\n"
 		"uniform mat4 uView;\n"
 		"uniform mat4 uProj;\n"
 		"void main() {\n"
 		"    gl_Position = uProj * uView * uModel * vec4(aPos, 1.0);\n"
 		"    vUV = aUV;\n"
+		"    vLocalPos = aPos;\n"
 		"}\n";
 
 	const char* fragSrc =
 		"#version 330 core\n"
 		"uniform sampler2D uTexture;\n"
+		"uniform float uHalfHeight;\n"
 		"in vec2 vUV;\n"
+		"in vec3 vLocalPos;\n"
 		"out vec4 fragColor;\n"
 		"void main() {\n"
-		"    fragColor = texture(uTexture, vUV);\n"
+		"    float theta = atan(vLocalPos.x, -vLocalPos.z);\n"
+		"    float halfArc = 1.3962634;\n"
+		"    float maxY = uHalfHeight * cos(theta);\n"
+		"    if (abs(vLocalPos.y) > maxY) discard;\n"
+		"    float v = (vLocalPos.y + maxY) / (2.0 * maxY);\n"
+		"    float u = (tan(theta) / tan(halfArc) + 1.0) * 0.5;\n"
+		"    fragColor = texture(uTexture, vec2(u, v));\n"
 		"}\n";
 
 	GLuint vert = CompileCylinderShader(GL_VERTEX_SHADER, vertSrc);
@@ -179,6 +188,7 @@ static void InitCylinderShader() {
 	cylUniformView = glGetUniformLocation(cylinderProgram, "uView");
 	cylUniformProj = glGetUniformLocation(cylinderProgram, "uProj");
 	cylUniformTex = glGetUniformLocation(cylinderProgram, "uTexture");
+	cylUniformHalfHeight = glGetUniformLocation(cylinderProgram, "uHalfHeight");
 
 	glDeleteShader(vert);
 	glDeleteShader(frag);
@@ -193,6 +203,7 @@ static void InitCylinderGeometry() {
 	float aspect = 480.0f / 272.0f;
 	float height = arcLength / aspect;
 
+	cylinderHalfHeight = height * 0.5f;
 	GenerateCylinderMesh(radius, height, arcAngle, 64);
 	InitCylinderShader();
 
@@ -298,6 +309,7 @@ static void RenderCylinderScreen(int fboIndex, engine_t* engine) {
 	GL(glActiveTexture(GL_TEXTURE0));
 	GL(glBindTexture(GL_TEXTURE_2D, renderer->StagingTexture[fboIndex]));
 	GL(glUniform1i(cylUniformTex, 0));
+	GL(glUniform1f(cylUniformHalfHeight, cylinderHalfHeight));
 
 	GL(glBindVertexArray(cylinderVAO));
 	GL(glDrawElements(GL_TRIANGLES, cylinderIndexCount, GL_UNSIGNED_INT, 0));

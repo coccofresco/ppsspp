@@ -5,22 +5,22 @@
 See: .planning/PROJECT.md (updated 2026-02-17)
 
 **Core value:** PSP games playable in immersive VR on PC with the same quality and feature set as the existing Meta Quest version
-**Current focus:** Phase 3.1 COMPLETE - Display Modes & Projection Correction — display surface selection, equirect layers, and cylinder correction shader all implemented.
+**Current focus:** Phase 3.1 IN PROGRESS - Display Modes & Projection Correction — display surface selection, geometry-based cylinder rendering (q3vr approach), projection layer submission.
 
 ## Current Position
 
 Phase: 3.1 of 4 (Display Modes & Projection Correction)
-Plan: 2 of 2 in current phase (COMPLETE)
-Status: **Phase 3.1 complete.** Display surface selection, equirect layers, and cylinder correction shader all implemented. Ready for Phase 4.
-Last activity: 2026-02-22 — Cylinder correction shader with staging FBO integrated
+Plan: 3 of 3 in current phase (COMPLETE)
+Status: **Phase 3.1 COMPLETE.** Perspective-corrected cylinder UVs (inverse cylindrical projection), shared VRDisplaySurface enum, self-documenting code. Ready for hardware testing.
+Last activity: 2026-03-01 — Perspective-corrected UVs and shared enum constants
 
-Progress: [█████████░] 90%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 9 (01-01, 01-02, 01-03, 02-01, 02-02, 03-01, 03-02, 03.1-01, 03.1-02)
-- Average duration: ~10min
+- Total plans completed: 10 (01-01, 01-02, 01-03, 02-01, 02-02, 03-01, 03-02, 03.1-01, 03.1-02, 03.1-03)
+- Average duration: ~9min
 - Total execution time: ~1.4 hours
 
 **By Phase:**
@@ -30,7 +30,7 @@ Progress: [█████████░] 90%
 | 01 | 3 | ~64min | ~21min |
 | 02 | 2 | ~6min | ~3min |
 | 03 | 2 | ~12min | ~6min |
-| 03.1 | 2 | ~13min | ~6.5min |
+| 03.1 | 3 | ~15min | ~5min |
 
 *Updated after each plan completion*
 
@@ -55,13 +55,16 @@ Recent decisions affecting current work:
 - [03.1-01]: Equirect2 preferred over v1 when both available (simpler angular parameters)
 - [03.1-01]: ovrMaxLayerCount increased from 3 to 4 (passthrough + per-eye layers + spare)
 - [03.1-01]: Display surface independent of stereo toggle -- orthogonal controls
-- [03.1-02]: 90-degree central angle (PI/2) for cylinder correction matches VR_FinishFrame cylinder layer
-- [03.1-02]: Dummy VAO for vertex-less draw required by GL core profile
-- [03.1-02]: GL_SRGB8_ALPHA8 staging texture matches swapchain format
+- [03.1-02]: Old cylinder correction shader (pincushion pre-warp + composition layer) REPLACED by geometry-based cylinder mesh (q3vr approach)
+- [03.1-02]: Custom glDraw* works on swapchain FBOs — previous "swapchain blocks draws" was dirty GL state, not a limitation
+- [03.1-02]: Raw sRGB passthrough (GL_FRAMEBUFFER_SRGB disabled) eliminates posterization — zero conversions in the pipeline
+- [03.1-02]: GL state save/restore (q3vr pattern) required for drawing on swapchain FBO after PPSSPP's GLQueueRunner
+- [03.1-03]: Perspective-corrected UVs use tan(theta)/tan(halfArc) — inverse cylindrical projection makes straight lines appear straight on curved surface
+- [03.1-03]: VRDisplaySurface enum shared via VRRenderer.h, not duplicated locally
 
 ### Roadmap Evolution
 
-- Phase 3.1 inserted after Phase 3: Display Modes & Projection Correction (INSERTED) — decouple stereo toggle from display surface selection, add cylinder correction shader (pincushion pre-warp), add equirect composition layer support. Phase 4 postponed.
+- Phase 3.1 inserted after Phase 3: Display Modes & Projection Correction (INSERTED) — decouple stereo toggle from display surface selection, geometry-based cylinder rendering (replaced old correction shader + composition layer approach). Phase 4 postponed.
 
 ### Pending Todos
 
@@ -75,8 +78,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-02-22
-Stopped at: Completed 03.1-02-PLAN.md (cylinder correction shader). Phase 3.1 complete. Next: Phase 4.
+Last session: 2026-03-01
+Stopped at: Completed 03.1-03-PLAN.md — Phase 3.1 complete. Perspective-corrected cylinder UVs, shared VRDisplaySurface enum.
 Resume file: N/A — no active debug.
 
 ### Stereo Divergence — RESOLVED (commit 031fdaf088)
