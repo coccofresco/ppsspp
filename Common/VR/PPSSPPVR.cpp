@@ -856,6 +856,7 @@ void UpdateVRProjection(float* projMatrix, float* output) {
 	if (IsBigScreenVRMode() && VR_GetConfig(VR_CONFIG_DISPLAY_SURFACE) == 1 /*VR_SURFACE_CURVED*/) {
 		float fovMult = 2.0f * g_Config.fFieldOfViewPercentage / 100.0f;
 		output[0] /= fovMult;
+		output[5] /= fovMult;
 	}
 	if (!IsBigScreenVRMode()) {
 		output[11] *= g_Config.fFieldOfViewPercentage / 100.0f;
@@ -888,6 +889,7 @@ void UpdateVRProjectionStereo(float* projMatrix, float* leftOutput, float* right
 		if (IsBigScreenVRMode() && VR_GetConfig(VR_CONFIG_DISPLAY_SURFACE) == 1 /*VR_SURFACE_CURVED*/) {
 			float fovMult = 2.0f * g_Config.fFieldOfViewPercentage / 100.0f;
 			outputs[eye][0] /= fovMult;
+			outputs[eye][5] /= fovMult;
 		}
 		if (!IsBigScreenVRMode()) {
 			outputs[eye][11] *= g_Config.fFieldOfViewPercentage / 100.0f;

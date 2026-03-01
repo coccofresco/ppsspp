@@ -563,8 +563,7 @@ void VR_FinishFrame( engine_t* engine ) {
 			float centralAngle = baseCentralAngle * fovScale;
 			if (centralAngle > (float)(M_PI * 3.0 / 2.0)) centralAngle = (float)(M_PI * 3.0 / 2.0);
 			cylinder_layer.centralAngle = centralAngle;
-			// Content rendered with 2x*fovScale wider FOV, so cylinder must be proportionally wider
-			cylinder_layer.aspectRatio = VR_GetConfigFloat(VR_CONFIG_CANVAS_ASPECT) * 2.0f * fovScale;
+			cylinder_layer.aspectRatio = VR_GetConfigFloat(VR_CONFIG_CANVAS_ASPECT);
 			if (headTracking && !reprojection) {
 				float width = (float)engine->appState.ViewConfigurationView[0].recommendedImageRectWidth;
 				float height = (float)engine->appState.ViewConfigurationView[0].recommendedImageRectHeight;
