@@ -9,9 +9,26 @@
 #include <cstdlib>
 #include <cstring>
 
+#if XR_USE_GRAPHICS_API_OPENGL || XR_USE_GRAPHICS_API_OPENGL_ES
+#include "ext/OpenXR-SDK/src/common/xr_linear.h"
+#if XR_USE_GRAPHICS_API_OPENGL_ES
+#define VR_GL_SWAPCHAIN_IMAGE XrSwapchainImageOpenGLESKHR
+#else
+#define VR_GL_SWAPCHAIN_IMAGE XrSwapchainImageOpenGLKHR
+#endif
+#endif
+
 extern void VRLog(const char* msg);
 
 enum VRDisplaySurface { VR_SURFACE_FLAT = 0, VR_SURFACE_CURVED = 1, VR_SURFACE_IMMERSIVE = 2 };
+
+#if XR_USE_GRAPHICS_API_OPENGL || XR_USE_GRAPHICS_API_OPENGL_ES
+static GLuint cylinderVAO = 0, cylinderVBO = 0, cylinderEBO = 0;
+static int cylinderIndexCount = 0;
+static GLuint cylinderProgram = 0;
+static GLint cylUniformModel = -1, cylUniformView = -1, cylUniformProj = -1, cylUniformTex = -1;
+static bool cylinderMeshReady = false;
+#endif
 
 XrFovf fov;
 XrView* projections;
@@ -36,6 +53,257 @@ DECL_PFN(xrDestroyPassthroughLayerFB);
 DECL_PFN(xrPassthroughLayerPauseFB);
 DECL_PFN(xrPassthroughLayerResumeFB);
 
+
+#if XR_USE_GRAPHICS_API_OPENGL || XR_USE_GRAPHICS_API_OPENGL_ES
+
+static void GenerateCylinderMesh(float radius, float height, float arcAngle, int segments) {
+	int vertsPerRow = segments + 1;
+	int totalVerts = vertsPerRow * 2;
+	int floatsPerVert = 5; // xyz + uv
+
+	float* vertices = (float*)malloc(totalVerts * floatsPerVert * sizeof(float));
+	int totalIndices = segments * 6;
+	unsigned int* indices = (unsigned int*)malloc(totalIndices * sizeof(unsigned int));
+
+	float* vptr = vertices;
+	unsigned int* iptr = indices;
+
+	float startAngle = -arcAngle * 0.5f;
+	float dTheta = arcAngle / (float)segments;
+
+	for (int i = 0; i <= segments; i++) {
+		float theta = startAngle + i * dTheta;
+		float x = radius * sinf(theta);
+		float z = -radius * cosf(theta);
+		float u = (float)i / (float)segments;
+
+		// Top vertex
+		*vptr++ = x; *vptr++ = height * 0.5f; *vptr++ = z;
+		*vptr++ = u; *vptr++ = 1.0f;
+
+		// Bottom vertex
+		*vptr++ = x; *vptr++ = -height * 0.5f; *vptr++ = z;
+		*vptr++ = u; *vptr++ = 0.0f;
+	}
+
+	for (int i = 0; i < segments; i++) {
+		int top0 = i * 2;
+		int bot0 = top0 + 1;
+		int top1 = top0 + 2;
+		int bot1 = bot0 + 2;
+
+		*iptr++ = top0; *iptr++ = top1; *iptr++ = bot0;
+		*iptr++ = bot0; *iptr++ = top1; *iptr++ = bot1;
+	}
+
+	cylinderIndexCount = totalIndices;
+
+	GL(glGenVertexArrays(1, &cylinderVAO));
+	GL(glBindVertexArray(cylinderVAO));
+
+	GL(glGenBuffers(1, &cylinderVBO));
+	GL(glBindBuffer(GL_ARRAY_BUFFER, cylinderVBO));
+	GL(glBufferData(GL_ARRAY_BUFFER, totalVerts * floatsPerVert * sizeof(float), vertices, GL_STATIC_DRAW));
+
+	GL(glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0));
+	GL(glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float))));
+	GL(glEnableVertexAttribArray(0));
+	GL(glEnableVertexAttribArray(1));
+
+	GL(glGenBuffers(1, &cylinderEBO));
+	GL(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, cylinderEBO));
+	GL(glBufferData(GL_ELEMENT_ARRAY_BUFFER, totalIndices * sizeof(unsigned int), indices, GL_STATIC_DRAW));
+
+	GL(glBindVertexArray(0));
+
+	free(vertices);
+	free(indices);
+}
+
+static GLuint CompileCylinderShader(GLenum type, const char* source) {
+	GLuint shader = glCreateShader(type);
+	glShaderSource(shader, 1, &source, NULL);
+	glCompileShader(shader);
+	GLint success;
+	glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+	if (!success) {
+		char infoLog[512];
+		glGetShaderInfoLog(shader, 512, NULL, infoLog);
+		VRLog("[CylinderShader] Compile error:");
+		VRLog(infoLog);
+	}
+	return shader;
+}
+
+static void InitCylinderShader() {
+	const char* vertSrc =
+		"#version 330 core\n"
+		"layout(location=0) in vec3 aPos;\n"
+		"layout(location=1) in vec2 aUV;\n"
+		"out vec2 vUV;\n"
+		"uniform mat4 uModel;\n"
+		"uniform mat4 uView;\n"
+		"uniform mat4 uProj;\n"
+		"void main() {\n"
+		"    gl_Position = uProj * uView * uModel * vec4(aPos, 1.0);\n"
+		"    vUV = aUV;\n"
+		"}\n";
+
+	const char* fragSrc =
+		"#version 330 core\n"
+		"uniform sampler2D uTexture;\n"
+		"in vec2 vUV;\n"
+		"out vec4 fragColor;\n"
+		"void main() {\n"
+		"    fragColor = texture(uTexture, vUV);\n"
+		"}\n";
+
+	GLuint vert = CompileCylinderShader(GL_VERTEX_SHADER, vertSrc);
+	GLuint frag = CompileCylinderShader(GL_FRAGMENT_SHADER, fragSrc);
+
+	cylinderProgram = glCreateProgram();
+	glAttachShader(cylinderProgram, vert);
+	glAttachShader(cylinderProgram, frag);
+	glLinkProgram(cylinderProgram);
+
+	GLint success;
+	glGetProgramiv(cylinderProgram, GL_LINK_STATUS, &success);
+	if (!success) {
+		char infoLog[512];
+		glGetProgramInfoLog(cylinderProgram, 512, NULL, infoLog);
+		VRLog("[CylinderShader] Link error:");
+		VRLog(infoLog);
+	}
+
+	cylUniformModel = glGetUniformLocation(cylinderProgram, "uModel");
+	cylUniformView = glGetUniformLocation(cylinderProgram, "uView");
+	cylUniformProj = glGetUniformLocation(cylinderProgram, "uProj");
+	cylUniformTex = glGetUniformLocation(cylinderProgram, "uTexture");
+
+	glDeleteShader(vert);
+	glDeleteShader(frag);
+}
+
+static void InitCylinderGeometry() {
+	if (cylinderMeshReady) return;
+
+	float radius = 2.0f;
+	float arcAngle = (float)(M_PI * 8.0 / 9.0); // 160 degrees
+	float arcLength = radius * arcAngle;
+	float aspect = 480.0f / 272.0f;
+	float height = arcLength / aspect;
+
+	GenerateCylinderMesh(radius, height, arcAngle, 64);
+	InitCylinderShader();
+
+	cylinderMeshReady = true;
+	VRLog("[CylinderGeometry] Mesh and shader initialized");
+}
+
+static void DestroyCylinderGeometry() {
+	if (!cylinderMeshReady) return;
+
+	if (cylinderProgram) {
+		glDeleteProgram(cylinderProgram);
+		cylinderProgram = 0;
+	}
+	if (cylinderVAO) {
+		glDeleteVertexArrays(1, &cylinderVAO);
+		cylinderVAO = 0;
+	}
+	if (cylinderVBO) {
+		glDeleteBuffers(1, &cylinderVBO);
+		cylinderVBO = 0;
+	}
+	if (cylinderEBO) {
+		glDeleteBuffers(1, &cylinderEBO);
+		cylinderEBO = 0;
+	}
+	cylinderMeshReady = false;
+	cylinderIndexCount = 0;
+}
+
+static void RenderCylinderScreen(int fboIndex, engine_t* engine) {
+	ovrFramebuffer* fb = &engine->appState.Renderer.FrameBuffer[fboIndex];
+	ovrRenderer* renderer = &engine->appState.Renderer;
+	int w = fb->Width, h = fb->Height;
+	GLuint swapchainFBO = fb->GLFrameBuffers[fb->TextureSwapChainIndex];
+
+	// Get the swapchain color texture — this IS the game content rendered by PPSSPP
+	GLuint gameTexture = ((VR_GL_SWAPCHAIN_IMAGE*)fb->ColorSwapChainImage)[fb->TextureSwapChainIndex].image;
+
+	// 1. Clear staging FBO (black background around the cylinder)
+	GL(glBindFramebuffer(GL_FRAMEBUFFER, renderer->StagingFBO[fboIndex]));
+	GL(glViewport(0, 0, renderer->StagingWidth, renderer->StagingHeight));
+	GL(glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE));
+	GL(glClearColor(0.0f, 0.0f, 0.0f, 1.0f));
+	GL(glClear(GL_COLOR_BUFFER_BIT));
+
+	// 2. GL state for cylinder draw
+	GL(glDisable(GL_DEPTH_TEST));
+	GL(glDisable(GL_BLEND));
+	GL(glDisable(GL_CULL_FACE));
+	GL(glDisable(GL_SCISSOR_TEST));
+	GL(glDisable(GL_STENCIL_TEST));
+
+	// 3. Build MVP matrices
+	// Model: cylinder center at viewer's head position, rotated by menuYaw
+	float menuYaw = ToRadians(VR_GetConfigFloat(VR_CONFIG_MENU_YAW));
+	XrMatrix4x4f model, translation, rotation;
+	XrVector3f cylinderCenter = invViewTransform[0].position;
+	if (VR_GetConfig(VR_CONFIG_CANVAS_6DOF)) {
+		cylinderCenter = {0, 0, 0};
+	}
+	XrMatrix4x4f_CreateTranslation(&translation, cylinderCenter.x, cylinderCenter.y, cylinderCenter.z);
+	XrMatrix4x4f_CreateRotation(&rotation, 0.0f, menuYaw * 180.0f / (float)M_PI, 0.0f);
+	XrMatrix4x4f_Multiply(&model, &translation, &rotation);
+
+	// View: inverse of eye pose
+	XrMatrix4x4f eyePose, view;
+	XrMatrix4x4f_CreateFromRigidTransform(&eyePose, &invViewTransform[fboIndex]);
+	XrMatrix4x4f_InvertRigidBody(&view, &eyePose);
+
+	// Projection: from eye's actual FOV
+#if XR_USE_GRAPHICS_API_OPENGL_ES
+	GraphicsAPI gfxApi = GRAPHICS_OPENGL_ES;
+#else
+	GraphicsAPI gfxApi = GRAPHICS_OPENGL;
+#endif
+	XrMatrix4x4f proj;
+	XrMatrix4x4f_CreateProjectionFov(&proj, gfxApi, projections[fboIndex].fov, 0.1f, 100.0f);
+
+	// 4. Draw cylinder mesh with game texture
+	GL(glUseProgram(cylinderProgram));
+	GL(glUniformMatrix4fv(cylUniformModel, 1, GL_FALSE, (float*)model.m));
+	GL(glUniformMatrix4fv(cylUniformView, 1, GL_FALSE, (float*)view.m));
+	GL(glUniformMatrix4fv(cylUniformProj, 1, GL_FALSE, (float*)proj.m));
+
+	GL(glActiveTexture(GL_TEXTURE0));
+	GL(glBindTexture(GL_TEXTURE_2D, gameTexture));
+	GL(glUniform1i(cylUniformTex, 0));
+
+	GL(glBindVertexArray(cylinderVAO));
+	GL(glDrawElements(GL_TRIANGLES, cylinderIndexCount, GL_UNSIGNED_INT, 0));
+	GL(glBindVertexArray(0));
+
+	GL(glBindTexture(GL_TEXTURE_2D, 0));
+	GL(glUseProgram(0));
+
+	// 5. Blit staging (linear RGBA8) → swapchain (SRGB8_ALPHA8)
+	// Must enable GL_FRAMEBUFFER_SRGB so the blit encodes linear→sRGB.
+	// Without this, linear values are stored directly in sRGB texture,
+	// and the runtime decodes them again → double gamma → too dark.
+	GL(glEnable(GL_FRAMEBUFFER_SRGB));
+	GL(glBindFramebuffer(GL_READ_FRAMEBUFFER, renderer->StagingFBO[fboIndex]));
+	GL(glBindFramebuffer(GL_DRAW_FRAMEBUFFER, swapchainFBO));
+	GL(glBlitFramebuffer(0, 0, renderer->StagingWidth, renderer->StagingHeight, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_LINEAR));
+	GL(glDisable(GL_FRAMEBUFFER_SRGB));
+
+	// Restore swapchain FBO binding
+	GL(glBindFramebuffer(GL_FRAMEBUFFER, swapchainFBO));
+}
+
+#endif // XR_USE_GRAPHICS_API_OPENGL || XR_USE_GRAPHICS_API_OPENGL_ES
 
 void VR_UpdateStageBounds(ovrApp* pappState) {
 	XrExtent2Df stageBounds = {};
@@ -274,6 +542,10 @@ void VR_InitRenderer( engine_t* engine ) {
 	ovrRenderer_Create(engine->appState.Session, &engine->appState.Renderer, eyeW, eyeH);
 	VRLog("[VR_InitRenderer] ovrRenderer_Create OK");
 
+#if XR_USE_GRAPHICS_API_OPENGL || XR_USE_GRAPHICS_API_OPENGL_ES
+	InitCylinderGeometry();
+#endif
+
 	if (VR_GetPlatformFlag(VRPlatformFlag::VR_PLATFORM_EXTENSION_PASSTHROUGH)) {
 		XrPassthroughCreateInfoFB ptci = {XR_TYPE_PASSTHROUGH_CREATE_INFO_FB};
 		XrResult result;
@@ -300,6 +572,9 @@ void VR_DestroyRenderer( engine_t* engine ) {
 		OXR(xrDestroyPassthroughFB(passthrough));
 		passthrough = XR_NULL_HANDLE;
 	}
+#if XR_USE_GRAPHICS_API_OPENGL || XR_USE_GRAPHICS_API_OPENGL_ES
+	DestroyCylinderGeometry();
+#endif
 	ovrRenderer_Destroy(&engine->appState.Renderer);
 	free(projections);
 	initialized = false;
@@ -436,6 +711,13 @@ void VR_EndFrame( engine_t* engine ) {
 		ovrRenderer_StereoDebugWatermark(fboIndex);
 	}
 
+	// Render cylinder mesh for curved cinema mode
+#if XR_USE_GRAPHICS_API_OPENGL || XR_USE_GRAPHICS_API_OPENGL_ES
+	if (vrConfig[VR_CONFIG_DISPLAY_SURFACE] == VR_SURFACE_CURVED && screenMode && cylinderMeshReady) {
+		RenderCylinderScreen(fboIndex, engine);
+	}
+#endif
+
 	ovrFramebuffer_Release(&engine->appState.Renderer.FrameBuffer[fboIndex]);
 }
 
@@ -536,59 +818,45 @@ void VR_FinishFrame( engine_t* engine ) {
 		// Determine display surface with graceful fallback chain
 		int requestedSurface = vrConfig[VR_CONFIG_DISPLAY_SURFACE];
 		int actualSurface = requestedSurface;
-		// Fallback: Curved -> Flat
-		if (actualSurface == VR_SURFACE_CURVED && !VR_GetPlatformFlag(VR_PLATFORM_EXTENSION_CYLINDER)) {
+		// Geometry-based cylinder only supports MONO_SCREEN and STEREO_SCREEN
+		if (actualSurface == VR_SURFACE_CURVED &&
+		    vrMode != VR_MODE_MONO_SCREEN && vrMode != VR_MODE_STEREO_SCREEN) {
 			actualSurface = VR_SURFACE_FLAT;
 		}
 
 		if (actualSurface == VR_SURFACE_CURVED) {
-			// Cylinder layer for curved cinema screen (Quest Link, Pico, any runtime with cylinder support)
-			// Player is at the center of the cylinder, looking at the inner surface.
-			XrCompositionLayerCylinderKHR cylinder_layer = {};
-			cylinder_layer.type = XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR;
-			cylinder_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
-			cylinder_layer.space = engine->appState.CurrentSpace;
-			memset(&cylinder_layer.subImage, 0, sizeof(XrSwapchainSubImage));
-			cylinder_layer.subImage.imageRect.offset.x = 0;
-			cylinder_layer.subImage.imageRect.offset.y = 0;
-			cylinder_layer.subImage.imageRect.extent.width = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Width;
-			cylinder_layer.subImage.imageRect.extent.height = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Height;
-			cylinder_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[0].ColorSwapChain.Handle;
-			cylinder_layer.subImage.imageArrayIndex = 0;
-			cylinder_layer.pose.orientation = XrQuaternionf_Multiply(pitch, yaw);
-			cylinder_layer.pose.position = invViewTransform[0].position;
-			cylinder_layer.radius = 2.0f;
-			float fovScale = VR_GetConfigFloat(VR_CONFIG_FOV_SCALE);
-			float baseCentralAngle = (float)(M_PI * 8.0 / 9.0);  // 160deg base
-			float centralAngle = baseCentralAngle * fovScale;
-			if (centralAngle > (float)(M_PI * 3.0 / 2.0)) centralAngle = (float)(M_PI * 3.0 / 2.0);
-			cylinder_layer.centralAngle = centralAngle;
-			cylinder_layer.aspectRatio = VR_GetConfigFloat(VR_CONFIG_CANVAS_ASPECT);
-			if (headTracking && !reprojection) {
-				float width = (float)engine->appState.ViewConfigurationView[0].recommendedImageRectWidth;
-				float height = (float)engine->appState.ViewConfigurationView[0].recommendedImageRectHeight;
-				cylinder_layer.aspectRatio = 2.0f * width / height;
-				cylinder_layer.centralAngle = (float)(M_PI);
+			// Geometry-based cylinder: FBO already contains rendered cylinder mesh
+			// (rendered in VR_EndFrame via RenderCylinderScreen).
+			// Submit as projection layer — works on all OpenXR runtimes.
+			// Reuse function-scope projection_layer_elements to avoid dangling pointer
+			// (local arrays go out of scope before xrEndFrame reads the layer).
+			for (int eye = 0; eye < ovrMaxNumEyes; eye++) {
+				ovrFramebuffer* frameBuffer = &engine->appState.Renderer.FrameBuffer[0];
+				if (vrMode == VR_MODE_STEREO_SCREEN) {
+					frameBuffer = &engine->appState.Renderer.FrameBuffer[eye];
+				}
+
+				memset(&projection_layer_elements[eye], 0, sizeof(XrCompositionLayerProjectionView));
+				projection_layer_elements[eye].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
+				projection_layer_elements[eye].pose = invViewTransform[eye];
+				projection_layer_elements[eye].fov = projections[eye].fov;
+				projection_layer_elements[eye].subImage.swapchain = frameBuffer->ColorSwapChain.Handle;
+				projection_layer_elements[eye].subImage.imageRect.offset.x = 0;
+				projection_layer_elements[eye].subImage.imageRect.offset.y = 0;
+				projection_layer_elements[eye].subImage.imageRect.extent.width = frameBuffer->ColorSwapChain.Width;
+				projection_layer_elements[eye].subImage.imageRect.extent.height = frameBuffer->ColorSwapChain.Height;
+				projection_layer_elements[eye].subImage.imageArrayIndex = 0;
 			}
 
-			// Build the cylinder layer
-			if ((vrMode == VR_MODE_MONO_SCREEN) || (vrMode == VR_MODE_MONO_6DOF)) {
-				cylinder_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
-				engine->appState.Layers[engine->appState.LayerCount++].Cylinder = cylinder_layer;
-			} else if ((vrMode == VR_MODE_SBS_SCREEN) || (vrMode == VR_MODE_SBS_6DOF)) {
-				cylinder_layer.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
-				cylinder_layer.subImage.imageRect.extent.width /= 2;
-				engine->appState.Layers[engine->appState.LayerCount++].Cylinder = cylinder_layer;
-				cylinder_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
-				cylinder_layer.subImage.imageRect.offset.x += cylinder_layer.subImage.imageRect.extent.width;
-				engine->appState.Layers[engine->appState.LayerCount++].Cylinder = cylinder_layer;
-			} else {
-				cylinder_layer.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
-				engine->appState.Layers[engine->appState.LayerCount++].Cylinder = cylinder_layer;
-				cylinder_layer.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
-				cylinder_layer.subImage.swapchain = engine->appState.Renderer.FrameBuffer[1].ColorSwapChain.Handle;
-				engine->appState.Layers[engine->appState.LayerCount++].Cylinder = cylinder_layer;
-			}
+			XrCompositionLayerProjection projection_layer = {};
+			projection_layer.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION;
+			projection_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+			projection_layer.layerFlags |= XR_COMPOSITION_LAYER_CORRECT_CHROMATIC_ABERRATION_BIT;
+			projection_layer.space = engine->appState.CurrentSpace;
+			projection_layer.viewCount = ovrMaxNumEyes;
+			projection_layer.views = projection_layer_elements;
+
+			engine->appState.Layers[engine->appState.LayerCount++].Projection = projection_layer;
 		} else {
 			// Quad layer for flat cinema screen (default, SteamVR and runtimes without cylinder/equirect)
 			VR_SetConfig(VR_CONFIG_DEPTH_SUBMIT, 0);
