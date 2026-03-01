@@ -559,7 +559,7 @@ void VR_FinishFrame( engine_t* engine ) {
 			cylinder_layer.pose.position = invViewTransform[0].position;
 			cylinder_layer.radius = 2.0f;
 			float fovScale = VR_GetConfigFloat(VR_CONFIG_FOV_SCALE);
-			float baseCentralAngle = (float)(M_PI * 2.0 / 3.0);  // 120deg base
+			float baseCentralAngle = (float)(M_PI * 8.0 / 9.0);  // 160deg base
 			float centralAngle = baseCentralAngle * fovScale;
 			if (centralAngle > (float)(M_PI * 3.0 / 2.0)) centralAngle = (float)(M_PI * 3.0 / 2.0);
 			cylinder_layer.centralAngle = centralAngle;
