@@ -859,6 +859,14 @@ void UpdateVRProjection(float* projMatrix, float* output) {
 		output[5] /= fovMult;
 		VR_SetConfigFloat(VR_CONFIG_CINEMA_HALF_FOV, atanf(1.0f / fabsf(output[0])));
 	}
+	// Cylinder 120: force exactly 120° horizontal FOV (halfFOV = 60°)
+	if (IsBigScreenVRMode() && VR_GetConfig(VR_CONFIG_DISPLAY_SURFACE) == VR_SURFACE_CYLINDER120) {
+		float tanHalf = tanf((float)M_PI / 3.0f); // tan(60°)
+		float sign0 = (output[0] >= 0) ? 1.0f : -1.0f;
+		float sign5 = (output[5] >= 0) ? 1.0f : -1.0f;
+		output[0] = sign0 / tanHalf;
+		output[5] = sign5 * (480.0f / 272.0f) / tanHalf;
+	}
 	if (!IsBigScreenVRMode()) {
 		output[11] *= g_Config.fFieldOfViewPercentage / 100.0f;
 	}
@@ -894,6 +902,14 @@ void UpdateVRProjectionStereo(float* projMatrix, float* leftOutput, float* right
 			if (eye == 0) {
 				VR_SetConfigFloat(VR_CONFIG_CINEMA_HALF_FOV, atanf(1.0f / fabsf(outputs[0][0])));
 			}
+		}
+		// Cylinder 120: force exactly 120° horizontal FOV (halfFOV = 60°)
+		if (IsBigScreenVRMode() && VR_GetConfig(VR_CONFIG_DISPLAY_SURFACE) == VR_SURFACE_CYLINDER120) {
+			float tanHalf = tanf((float)M_PI / 3.0f);
+			float sign0 = (outputs[eye][0] >= 0) ? 1.0f : -1.0f;
+			float sign5 = (outputs[eye][5] >= 0) ? 1.0f : -1.0f;
+			outputs[eye][0] = sign0 / tanHalf;
+			outputs[eye][5] = sign5 * (480.0f / 272.0f) / tanHalf;
 		}
 		if (!IsBigScreenVRMode()) {
 			outputs[eye][11] *= g_Config.fFieldOfViewPercentage / 100.0f;

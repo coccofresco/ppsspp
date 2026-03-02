@@ -27,6 +27,14 @@ static GLuint cylinderProgram = 0;
 static GLint cylUniformModel = -1, cylUniformView = -1, cylUniformProj = -1, cylUniformTex = -1;
 static bool cylinderMeshReady = false;
 static float cylinderHalfHeight = 0.0f;
+
+// Cylinder 120° mode: rectilinear-corrected 120° cylinder
+static GLuint cyl120VAO = 0, cyl120VBO = 0, cyl120EBO = 0;
+static int cyl120IndexCount = 0;
+static GLuint cyl120Program = 0;
+static GLint cyl120UniformModel = -1, cyl120UniformView = -1, cyl120UniformProj = -1;
+static GLint cyl120UniformTex = -1, cyl120UniformHalfFOV = -1;
+static bool cyl120MeshReady = false;
 #endif
 
 XrFovf fov;
@@ -55,7 +63,8 @@ DECL_PFN(xrPassthroughLayerResumeFB);
 
 #if XR_USE_GRAPHICS_API_OPENGL || XR_USE_GRAPHICS_API_OPENGL_ES
 
-static void GenerateCylinderMesh(float radius, float height, float arcAngle, int segments) {
+static void GenerateCylinderMesh(float radius, float height, float arcAngle, int segments,
+	GLuint* outVAO, GLuint* outVBO, GLuint* outEBO, int* outIndexCount) {
 	int vertsPerRow = segments + 1;
 	int totalVerts = vertsPerRow * 2;
 	int floatsPerVert = 5; // xyz + uv
@@ -95,13 +104,13 @@ static void GenerateCylinderMesh(float radius, float height, float arcAngle, int
 		*iptr++ = bot0; *iptr++ = top1; *iptr++ = bot1;
 	}
 
-	cylinderIndexCount = totalIndices;
+	*outIndexCount = totalIndices;
 
-	GL(glGenVertexArrays(1, &cylinderVAO));
-	GL(glBindVertexArray(cylinderVAO));
+	GL(glGenVertexArrays(1, outVAO));
+	GL(glBindVertexArray(*outVAO));
 
-	GL(glGenBuffers(1, &cylinderVBO));
-	GL(glBindBuffer(GL_ARRAY_BUFFER, cylinderVBO));
+	GL(glGenBuffers(1, outVBO));
+	GL(glBindBuffer(GL_ARRAY_BUFFER, *outVBO));
 	GL(glBufferData(GL_ARRAY_BUFFER, totalVerts * floatsPerVert * sizeof(float), vertices, GL_STATIC_DRAW));
 
 	GL(glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0));
@@ -109,8 +118,8 @@ static void GenerateCylinderMesh(float radius, float height, float arcAngle, int
 	GL(glEnableVertexAttribArray(0));
 	GL(glEnableVertexAttribArray(1));
 
-	GL(glGenBuffers(1, &cylinderEBO));
-	GL(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, cylinderEBO));
+	GL(glGenBuffers(1, outEBO));
+	GL(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, *outEBO));
 	GL(glBufferData(GL_ELEMENT_ARRAY_BUFFER, totalIndices * sizeof(unsigned int), indices, GL_STATIC_DRAW));
 
 	GL(glBindVertexArray(0));
@@ -193,11 +202,98 @@ static void InitCylinderGeometry() {
 	float height = arcLength / aspect;
 
 	cylinderHalfHeight = height * 0.5f;
-	GenerateCylinderMesh(radius, height, arcAngle, 64);
+	GenerateCylinderMesh(radius, height, arcAngle, 64,
+		&cylinderVAO, &cylinderVBO, &cylinderEBO, &cylinderIndexCount);
 	InitCylinderShader();
 
 	cylinderMeshReady = true;
 	VRLog("[CylinderGeometry] Mesh and shader initialized");
+}
+
+// Cylinder 120° mode: rectilinear-corrected shader
+static void InitCylinder120Shader() {
+	// Vertex shader: plain transform, pass UV and theta to fragment
+	const char* vertSrc =
+		"#version 330 core\n"
+		"layout(location=0) in vec3 aPos;\n"
+		"layout(location=1) in vec2 aUV;\n"
+		"out vec2 vUV;\n"
+		"uniform mat4 uModel;\n"
+		"uniform mat4 uView;\n"
+		"uniform mat4 uProj;\n"
+		"void main() {\n"
+		"    gl_Position = uProj * uView * uModel * vec4(aPos, 1.0);\n"
+		"    vUV = aUV;\n"
+		"}\n";
+
+	// Fragment shader: rectilinear correction (horizontal tan + vertical 1/cos stretch)
+	const char* fragSrc =
+		"#version 330 core\n"
+		"uniform sampler2D uTexture;\n"
+		"uniform float uHalfFOV;\n"
+		"in vec2 vUV;\n"
+		"out vec4 fragColor;\n"
+		"void main() {\n"
+		"    float theta = (vUV.x - 0.5) * 2.0 * uHalfFOV;\n"
+		"    float u = 0.5 + tan(theta) / (2.0 * tan(uHalfFOV));\n"
+		"    float v = 0.5 + (vUV.y - 0.5) / cos(theta);\n"
+		"    fragColor = texture(uTexture, vec2(u, clamp(v, 0.0, 1.0)));\n"
+		"}\n";
+
+	GLuint vert = CompileCylinderShader(GL_VERTEX_SHADER, vertSrc);
+	GLuint frag = CompileCylinderShader(GL_FRAGMENT_SHADER, fragSrc);
+
+	cyl120Program = glCreateProgram();
+	glAttachShader(cyl120Program, vert);
+	glAttachShader(cyl120Program, frag);
+	glLinkProgram(cyl120Program);
+
+	GLint success;
+	glGetProgramiv(cyl120Program, GL_LINK_STATUS, &success);
+	if (!success) {
+		char infoLog[512];
+		glGetProgramInfoLog(cyl120Program, 512, NULL, infoLog);
+		VRLog("[Cyl120Shader] Link error:");
+		VRLog(infoLog);
+	}
+
+	cyl120UniformModel = glGetUniformLocation(cyl120Program, "uModel");
+	cyl120UniformView = glGetUniformLocation(cyl120Program, "uView");
+	cyl120UniformProj = glGetUniformLocation(cyl120Program, "uProj");
+	cyl120UniformTex = glGetUniformLocation(cyl120Program, "uTexture");
+	cyl120UniformHalfFOV = glGetUniformLocation(cyl120Program, "uHalfFOV");
+
+	glDeleteShader(vert);
+	glDeleteShader(frag);
+}
+
+static void InitCylinder120Geometry() {
+	if (cyl120MeshReady) return;
+
+	float radius = 2.0f;
+	float arcAngle = (float)(M_PI * 2.0 / 3.0); // 120 degrees
+	float aspect = 480.0f / 272.0f;
+	// Height based on flat-screen equivalent width for correct rectilinear proportions
+	float flatWidth = 2.0f * radius * tanf(arcAngle * 0.5f);
+	float height = flatWidth / aspect;
+
+	GenerateCylinderMesh(radius, height, arcAngle, 64,
+		&cyl120VAO, &cyl120VBO, &cyl120EBO, &cyl120IndexCount);
+	InitCylinder120Shader();
+
+	cyl120MeshReady = true;
+	VRLog("[Cyl120Geometry] 120-degree mesh and rectilinear shader initialized");
+}
+
+static void DestroyCylinder120Geometry() {
+	if (!cyl120MeshReady) return;
+
+	if (cyl120Program) { glDeleteProgram(cyl120Program); cyl120Program = 0; }
+	if (cyl120VAO) { glDeleteVertexArrays(1, &cyl120VAO); cyl120VAO = 0; }
+	if (cyl120VBO) { glDeleteBuffers(1, &cyl120VBO); cyl120VBO = 0; }
+	if (cyl120EBO) { glDeleteBuffers(1, &cyl120EBO); cyl120EBO = 0; }
+	cyl120MeshReady = false;
+	cyl120IndexCount = 0;
 }
 
 static void DestroyCylinderGeometry() {
@@ -224,6 +320,31 @@ static void DestroyCylinderGeometry() {
 }
 
 static void RenderCylinderScreen(int fboIndex, engine_t* engine) {
+	int surface = vrConfig[VR_CONFIG_DISPLAY_SURFACE];
+
+	// Select resources based on mode
+	GLuint prog, vao;
+	int idxCount;
+	GLint uModel, uView, uProj, uTex;
+
+	if (surface == VR_SURFACE_CYLINDER120) {
+		prog = cyl120Program;
+		vao = cyl120VAO;
+		idxCount = cyl120IndexCount;
+		uModel = cyl120UniformModel;
+		uView = cyl120UniformView;
+		uProj = cyl120UniformProj;
+		uTex = cyl120UniformTex;
+	} else {
+		prog = cylinderProgram;
+		vao = cylinderVAO;
+		idxCount = cylinderIndexCount;
+		uModel = cylUniformModel;
+		uView = cylUniformView;
+		uProj = cylUniformProj;
+		uTex = cylUniformTex;
+	}
+
 	ovrFramebuffer* fb = &engine->appState.Renderer.FrameBuffer[fboIndex];
 	ovrRenderer* renderer = &engine->appState.Renderer;
 	int w = fb->Width, h = fb->Height;
@@ -290,16 +411,21 @@ static void RenderCylinderScreen(int fboIndex, engine_t* engine) {
 	XrMatrix4x4f_CreateProjectionFov(&proj, gfxApi, projections[fboIndex].fov, 0.1f, 100.0f);
 
 	// 5. Draw cylinder on swapchain, sampling from staging texture
-	GL(glUseProgram(cylinderProgram));
-	GL(glUniformMatrix4fv(cylUniformModel, 1, GL_FALSE, (float*)model.m));
-	GL(glUniformMatrix4fv(cylUniformView, 1, GL_FALSE, (float*)view.m));
-	GL(glUniformMatrix4fv(cylUniformProj, 1, GL_FALSE, (float*)proj.m));
+	GL(glUseProgram(prog));
+	GL(glUniformMatrix4fv(uModel, 1, GL_FALSE, (float*)model.m));
+	GL(glUniformMatrix4fv(uView, 1, GL_FALSE, (float*)view.m));
+	GL(glUniformMatrix4fv(uProj, 1, GL_FALSE, (float*)proj.m));
 	GL(glActiveTexture(GL_TEXTURE0));
 	GL(glBindTexture(GL_TEXTURE_2D, renderer->StagingTexture[fboIndex]));
-	GL(glUniform1i(cylUniformTex, 0));
+	GL(glUniform1i(uTex, 0));
 
-	GL(glBindVertexArray(cylinderVAO));
-	GL(glDrawElements(GL_TRIANGLES, cylinderIndexCount, GL_UNSIGNED_INT, 0));
+	// Set halfFOV uniform for rectilinear correction (cylinder 120 mode)
+	if (surface == VR_SURFACE_CYLINDER120) {
+		GL(glUniform1f(cyl120UniformHalfFOV, (float)(M_PI / 3.0)));
+	}
+
+	GL(glBindVertexArray(vao));
+	GL(glDrawElements(GL_TRIANGLES, idxCount, GL_UNSIGNED_INT, 0));
 	GL(glBindVertexArray(0));
 
 	// Restore GL state
@@ -556,6 +682,7 @@ void VR_InitRenderer( engine_t* engine ) {
 
 #if XR_USE_GRAPHICS_API_OPENGL || XR_USE_GRAPHICS_API_OPENGL_ES
 	InitCylinderGeometry();
+	InitCylinder120Geometry();
 #endif
 
 	if (VR_GetPlatformFlag(VRPlatformFlag::VR_PLATFORM_EXTENSION_PASSTHROUGH)) {
@@ -586,6 +713,7 @@ void VR_DestroyRenderer( engine_t* engine ) {
 	}
 #if XR_USE_GRAPHICS_API_OPENGL || XR_USE_GRAPHICS_API_OPENGL_ES
 	DestroyCylinderGeometry();
+	DestroyCylinder120Geometry();
 #endif
 	ovrRenderer_Destroy(&engine->appState.Renderer);
 	free(projections);
@@ -723,10 +851,14 @@ void VR_EndFrame( engine_t* engine ) {
 		ovrRenderer_StereoDebugWatermark(fboIndex);
 	}
 
-	// Render cylinder mesh for curved cinema mode
+	// Render cylinder mesh for cinema cylinder modes
 #if XR_USE_GRAPHICS_API_OPENGL || XR_USE_GRAPHICS_API_OPENGL_ES
-	if (vrConfig[VR_CONFIG_DISPLAY_SURFACE] == VR_SURFACE_CURVED && screenMode && cylinderMeshReady) {
-		RenderCylinderScreen(fboIndex, engine);
+	if (screenMode) {
+		int ds = vrConfig[VR_CONFIG_DISPLAY_SURFACE];
+		if ((ds == VR_SURFACE_CURVED && cylinderMeshReady) ||
+		    (ds == VR_SURFACE_CYLINDER120 && cyl120MeshReady)) {
+			RenderCylinderScreen(fboIndex, engine);
+		}
 	}
 #endif
 
@@ -830,13 +962,13 @@ void VR_FinishFrame( engine_t* engine ) {
 		// Determine display surface with graceful fallback chain
 		int requestedSurface = vrConfig[VR_CONFIG_DISPLAY_SURFACE];
 		int actualSurface = requestedSurface;
-		// Geometry-based cylinder only supports MONO_SCREEN and STEREO_SCREEN
-		if (actualSurface == VR_SURFACE_CURVED &&
+		// Geometry-based cylinders only support MONO_SCREEN and STEREO_SCREEN
+		if ((actualSurface == VR_SURFACE_CURVED || actualSurface == VR_SURFACE_CYLINDER120) &&
 		    vrMode != VR_MODE_MONO_SCREEN && vrMode != VR_MODE_STEREO_SCREEN) {
 			actualSurface = VR_SURFACE_FLAT;
 		}
 
-		if (actualSurface == VR_SURFACE_CURVED) {
+		if (actualSurface == VR_SURFACE_CURVED || actualSurface == VR_SURFACE_CYLINDER120) {
 			// Geometry-based cylinder: FBO already contains rendered cylinder mesh
 			// (rendered in VR_EndFrame via RenderCylinderScreen).
 			// Submit as projection layer — works on all OpenXR runtimes.

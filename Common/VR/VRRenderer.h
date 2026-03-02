@@ -54,7 +54,8 @@ enum VRMode {
 enum VRDisplaySurface {
 	VR_SURFACE_FLAT = 0,
 	VR_SURFACE_CURVED = 1,
-	VR_SURFACE_IMMERSIVE = 2
+	VR_SURFACE_IMMERSIVE = 2,
+	VR_SURFACE_CYLINDER120 = 3
 };
 
 void VR_GetResolution( engine_t* engine, int *pWidth, int *pHeight );

@@ -1511,7 +1511,7 @@ void GameSettingsScreen::CreateVRSettings(UI::ViewGroup *vrSettings) {
 	}
 
 	vrSettings->Add(new ItemHeader(vr->T("Display Surface")));
-	static const char *displaySurfaceNames[] = { "Cinema Flat", "Cinema Curved", "Immersive" };
+	static const char *displaySurfaceNames[] = { "Cinema Flat", "Cinema Curved", "Immersive", "Cylinder 120" };
 	PopupMultiChoice *surfaceChoice = vrSettings->Add(
 		new PopupMultiChoice(&g_Config.iVRDisplaySurface, vr->T("Display surface"),
 			displaySurfaceNames, 0, ARRAY_SIZE(displaySurfaceNames), I18NCat::VR, screenManager()));
