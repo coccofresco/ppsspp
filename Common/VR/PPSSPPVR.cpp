@@ -5,6 +5,7 @@
 #include "Common/GPU/OpenGL/GLRenderManager.h"
 #endif
 
+#include "Common/VR/VRCompatRating.h"
 #include "Common/VR/VRInput.h"
 #include "Common/VR/VRMath.h"
 #include "Common/VR/VRRenderer.h"
@@ -21,6 +22,7 @@
 
 #include "Core/Config.h"
 #include "Core/ConfigValues.h"
+#include "Core/ELF/ParamSFO.h"
 #include "Core/KeyMap.h"
 #include "Core/System.h"
 #include "Common/System/NativeApp.h"
@@ -720,6 +722,17 @@ bool IsPassthroughSupported() {
 
 bool IsBigScreenVRMode() {
 	bool vrIncompatibleGame = PSP_CoreParameter().compat.vrCompat().ForceFlatScreen;
+
+	// Unknown games (not in compatvr.ini) default to cinema mode for safety.
+	// User can override by saving per-game config with immersive enabled.
+	std::string gameID = g_paramSFO.GetDiscID();
+	if (!gameID.empty()) {
+		VRCompatInfo vrInfo = GetVRCompatInfo(gameID);
+		if (!vrInfo.known) {
+			vrIncompatibleGame = true;
+		}
+	}
+
 	bool vrMode = (g_Config.bEnableVR && IsImmersiveVRMode()) && !vrIncompatibleGame;
 	bool vrScene = !vrFlatForced && (g_Config.bManualForceVR || (vr3DGeometryCount > 15));
 	return !vrMode || !vrScene;
