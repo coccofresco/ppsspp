@@ -237,7 +237,8 @@ static void InitCylinder120Shader() {
 		"    float theta = (vUV.x - 0.5) * 2.0 * uHalfFOV;\n"
 		"    float u = 0.5 + tan(theta) / (2.0 * tan(uHalfFOV));\n"
 		"    float v = 0.5 + (vUV.y - 0.5) / cos(theta);\n"
-		"    fragColor = texture(uTexture, vec2(u, clamp(v, 0.0, 1.0)));\n"
+		"    if (u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }\n"
+"    fragColor = texture(uTexture, vec2(u, v));\n"
 		"}\n";
 
 	GLuint vert = CompileCylinderShader(GL_VERTEX_SHADER, vertSrc);
