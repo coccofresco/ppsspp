@@ -418,31 +418,6 @@ void ovrRenderer_MouseCursor(ovrRenderer* renderer, int x, int y, int sx, int sy
 #endif
 }
 
-void ovrRenderer_StereoDebugWatermark(int fboIndex) {
-#if XR_USE_GRAPHICS_API_OPENGL_ES || XR_USE_GRAPHICS_API_OPENGL
-	// Diagnostic watermark: FBO 0 = RED, FBO 1 = BLUE
-	// Large square in bottom-left corner (1/4 of FBO height)
-	// If LEFT eye sees RED → FBO mapping correct → issue is IPD sign (Stage 1/2)
-	// If LEFT eye sees BLUE → FBO mapping swapped → issue is FBO/submission (Stage 3/4)
-	GLint viewport[4];
-	glGetIntegerv(GL_VIEWPORT, viewport);
-	int size = viewport[3] / 4;  // 1/4 of FBO height
-	if (size < 50) size = 200;   // fallback if viewport not set
-
-	GLboolean scissorWasEnabled = glIsEnabled(GL_SCISSOR_TEST);
-	GL(glEnable(GL_SCISSOR_TEST));
-	GL(glScissor(0, 0, size, size));
-	if (fboIndex == 0) {
-		GL(glClearColor(1.0f, 0.0f, 0.0f, 1.0f));  // RED = FBO 0
-	} else {
-		GL(glClearColor(0.0f, 0.0f, 1.0f, 1.0f));  // BLUE = FBO 1
-	}
-	GL(glClear(GL_COLOR_BUFFER_BIT));
-	if (!scissorWasEnabled) {
-		GL(glDisable(GL_SCISSOR_TEST));
-	}
-#endif
-}
 
 /*
 ================================================================================
