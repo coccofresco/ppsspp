@@ -650,6 +650,8 @@ set(CommonVR
 	Common/VR/VRInput.h
 	Common/VR/VRMath.cpp
 	Common/VR/VRMath.h
+	Common/VR/VRCompatRating.cpp
+	Common/VR/VRCompatRating.h
 	Common/VR/VRRenderer.cpp
 	Common/VR/VRRenderer.h
 )
