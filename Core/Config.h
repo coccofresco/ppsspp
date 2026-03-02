@@ -587,6 +587,8 @@ public:
 	bool bEnableVR;
 	bool bEnable6DoF;
 	bool bEnableStereo;
+	int iVRDisplaySurface;           // 0=Flat, 1=Curved, 2=Immersive
+	bool bCylinderPerspectiveCorrection;
 	float fStereoIntensity;          // 0-150%, default 70 (moderate depth)
 	bool bHeadTracking;              // separate toggle from stereo
 	float fHeadTrackingSensitivity;  // 0.1-3.0, default 1.0 (1:1 natural)
