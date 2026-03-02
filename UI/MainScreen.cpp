@@ -73,6 +73,8 @@
 #include "UI/DarwinFileSystemServices.h" // For the browser
 #endif
 
+#include "Common/VR/PPSSPPVR.h"
+#include "Common/VR/VRCompatRating.h"
 #include "Core/HLE/sceUmd.h"
 
 bool MainScreen::showHomebrewTab = false;
@@ -516,6 +518,45 @@ void GameButton::Draw(UIContext &dc) {
 			} else {
 				dc.Draw()->DrawImage(regionIcons[regionIndex], bounds_.x + 4, y + h - image->h - 5, 1.0f);
 			}
+		}
+	}
+
+	// VR star rating overlay
+	if ((g_Config.bForceVR || System_GetPropertyInt(SYSPROP_DEVICE_TYPE) == DEVICE_TYPE_VR) && !ginfo->id.empty()) {
+		VRCompatInfo vrInfo = GetVRCompatInfo(ginfo->id);
+		int rating = DeriveVRStarRating(vrInfo.compat, vrInfo.known);
+
+		char ratingStr[8];
+		u32 ratingColor;
+		if (rating == 0) {
+			snprintf(ratingStr, sizeof(ratingStr), "VR:?");
+			ratingColor = 0xFF888888;
+		} else {
+			snprintf(ratingStr, sizeof(ratingStr), "VR:%d", rating);
+			static const u32 ratingColors[] = {
+				0xFF888888, 0xFFCC0000, 0xFFCC6600, 0xFFCCCC00, 0xFF88CC00, 0xFF00CC00
+			};
+			ratingColor = ratingColors[rating];
+		}
+
+		if (gridStyle_) {
+			float scale = 0.5f * g_Config.fGameGridScale;
+			dc.SetFontScale(scale, scale);
+			float tw, th;
+			dc.MeasureText(dc.GetFontStyle(), scale, scale, ratingStr, &tw, &th, 0);
+			float rx = bounds_.x + bounds_.w - tw - 4 * g_Config.fGameGridScale;
+			float ry = y + 2 * g_Config.fGameGridScale;
+			dc.DrawText(ratingStr, rx + 1, ry + 1, 0xAA000000, ALIGN_TOPLEFT);
+			dc.DrawText(ratingStr, rx, ry, ratingColor, ALIGN_TOPLEFT);
+			dc.SetFontScale(1.0f, 1.0f);
+		} else {
+			dc.SetFontScale(0.6f, 0.6f);
+			float tw, th;
+			dc.MeasureText(dc.GetFontStyle(), 0.6f, 0.6f, ratingStr, &tw, &th, 0);
+			float rx = bounds_.x + bounds_.w - tw - 8;
+			dc.DrawText(ratingStr, rx + 1, bounds_.centerY() + 1, 0xAA000000, ALIGN_VCENTER);
+			dc.DrawText(ratingStr, rx, bounds_.centerY(), ratingColor, ALIGN_VCENTER);
+			dc.SetFontScale(1.0f, 1.0f);
 		}
 	}
 
