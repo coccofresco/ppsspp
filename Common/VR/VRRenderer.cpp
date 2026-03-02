@@ -381,22 +381,6 @@ void VR_EndFrame( engine_t* engine ) {
 		ovrRenderer_MouseCursor(&engine->appState.Renderer, x, y, sx, sy);
 	}
 
-	// Stereo debug watermark: RED=FBO0, BLUE=FBO1
-	// If LEFT eye sees RED → FBO mapping OK, issue is IPD sign
-	// If LEFT eye sees BLUE → FBO mapping swapped
-	{
-		static int wmLogCount = 0;
-		if (wmLogCount < 10) {
-			char buf[256];
-			snprintf(buf, sizeof(buf),
-				"[VR-WATERMARK] vrMode=%d fboIndex=%d STEREO_6DOF=%d passes=%d",
-				vrMode, fboIndex, VR_MODE_STEREO_6DOF, vrConfig[VR_CONFIG_REPROJECTION]);
-			VRLog(buf);
-			wmLogCount++;
-		}
-		ovrRenderer_StereoDebugWatermark(fboIndex);
-	}
-
 	ovrFramebuffer_Release(&engine->appState.Renderer.FrameBuffer[fboIndex]);
 }
 
