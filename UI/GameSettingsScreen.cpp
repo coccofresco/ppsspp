@@ -32,6 +32,7 @@
 #include "Common/UI/Notice.h"
 #include "Common/Render/ManagedTexture.h"
 #include "Common/VR/PPSSPPVR.h"
+#include "Common/VR/VRCompatRating.h"
 #include "Common/BitSet.h"
 #include "Common/System/Display.h"  // Only to check screen aspect ratio with pixel_yres/pixel_xres
 #include "Common/System/Request.h"
@@ -73,6 +74,8 @@
 #include "Core/TiltEventProcessor.h"
 #include "Core/Instance.h"
 #include "Core/System.h"
+#include "Core/ELF/ParamSFO.h"
+#include "Core/Compatibility.h"
 #include "Core/Reporting.h"
 #include "Core/HLE/sceUsbCam.h"
 #include "Core/HLE/sceUsbMic.h"
@@ -1526,6 +1529,57 @@ void GameSettingsScreen::CreateVRSettings(UI::ViewGroup *vrSettings) {
 	PopupSliderChoiceFloat* vrHudScale = vrSettings->Add(new PopupSliderChoiceFloat(&g_Config.fHeadUpDisplayScale, 0.0f, 1.5f, 0.3f, vr->T("Heads-up display scale"), 0.1f, screenManager(), ""));
 	vrHudScale->SetEnabledPtr(&g_Config.bRescaleHUD);
 	vrSettings->Add(new CheckBox(&g_Config.bManualForceVR, vr->T("Manual switching between flat screen and VR using SCREEN key")));
+
+	// Per-game VR config section (only when a game is running)
+	if (PSP_IsInited() && !g_paramSFO.GetDiscID().empty()) {
+		vrSettings->Add(new ItemHeader(vr->T("Per-Game VR Config")));
+
+		std::string gameId = g_paramSFO.GetDiscID();
+		VRCompatInfo vrInfo = GetVRCompatInfo(gameId);
+		int rating = DeriveVRStarRating(vrInfo.compat, vrInfo.known);
+
+		std::string ratingText;
+		if (vrInfo.known) {
+			char buf[32];
+			snprintf(buf, sizeof(buf), "%d/5 stars", rating);
+			ratingText = buf;
+		} else {
+			ratingText = "Unknown (not in database)";
+		}
+		vrSettings->Add(new InfoItem(vr->T("VR Compatibility"), ratingText));
+
+		Choice *resetBtn = vrSettings->Add(new Choice(vr->T("Reset to Default")));
+		resetBtn->OnClick.Add([=](EventParams &e) {
+			std::string gid = g_paramSFO.GetDiscID();
+			if (!gid.empty()) {
+				if (g_Config.HasGameConfig(gid)) {
+					g_Config.DeleteGameConfig(gid);
+				}
+				g_Config.UnloadGameConfig();
+				PSP_CoreParameter().compat.Load(gid);
+			}
+		});
+
+		Choice *saveBtn = vrSettings->Add(new Choice(vr->T("Save Per-Game")));
+		saveBtn->OnClick.Add([=](EventParams &e) {
+			std::string gid = g_paramSFO.GetDiscID();
+			if (!gid.empty()) {
+				g_Config.CreateGameConfig(gid);
+				g_Config.SaveGameConfig(gid, g_paramSFO.GetValueString("TITLE"));
+			}
+		});
+
+		Choice *loadBtn = vrSettings->Add(new Choice(vr->T("Load Per-Game")));
+		loadBtn->OnClick.Add([=](EventParams &e) {
+			std::string gid = g_paramSFO.GetDiscID();
+			if (!gid.empty() && g_Config.HasGameConfig(gid)) {
+				g_Config.LoadGameConfig(gid);
+			}
+		});
+		loadBtn->SetEnabledFunc([=] {
+			return g_Config.HasGameConfig(g_paramSFO.GetDiscID());
+		});
+	}
 }
 
 void GameSettingsScreen::OnAdhocGuides(UI::EventParams &e) {
