@@ -1515,6 +1515,11 @@ void GameSettingsScreen::CreateVRSettings(UI::ViewGroup *vrSettings) {
 	PopupMultiChoice *surfaceChoice = vrSettings->Add(
 		new PopupMultiChoice(&g_Config.iVRDisplaySurface, vr->T("Display surface"),
 			displaySurfaceNames, 0, ARRAY_SIZE(displaySurfaceNames), I18NCat::VR, screenManager()));
+	CheckBox *perspCorrection = vrSettings->Add(
+		new CheckBox(&g_Config.bCylinderPerspectiveCorrection, vr->T("Perspective correction")));
+	perspCorrection->SetEnabledFunc([] {
+		return g_Config.iVRDisplaySurface == 1;  // VR_SURFACE_CURVED
+	});
 
 	vrSettings->Add(new ItemHeader(vr->T("Stereoscopic 3D")));
 	vrSettings->Add(new CheckBox(&g_Config.bEnableStereo, vr->T("Stereoscopic 3D")));

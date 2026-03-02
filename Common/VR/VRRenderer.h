@@ -36,6 +36,9 @@ enum VRConfigFloat {
 	// stereo 3D intensity (0.0 - 1.5, from fStereoIntensity / 100)
 	VR_CONFIG_STEREO_INTENSITY,
 
+	// cinema curved: half-FOV of the rendered content (radians), set per-frame
+	VR_CONFIG_CINEMA_HALF_FOV,
+
 	VR_CONFIG_FLOAT_MAX
 };
 
