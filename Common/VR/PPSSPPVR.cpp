@@ -172,7 +172,7 @@ void InitVROnWindows(HDC hDC, HGLRC hGLRC) {
 
 	// Set platform flags for PC VR
 	VR_SetPlatformFLag(VR_PLATFORM_CONTROLLER_QUEST, true);
-	VR_SetConfigFloat(VR_CONFIG_VIEWPORT_SUPERSAMPLING, 1.0f);
+	VR_SetConfigFloat(VR_CONFIG_VIEWPORT_SUPERSAMPLING, 1.3f);
 
 	VRLog("[VR] Calling VR_Init...");
 	VR_Init(nullptr, "PPSSPP", 0);

@@ -372,11 +372,6 @@ static void RenderCylinderScreen(int fboIndex, engine_t* engine) {
 	GL(glBindFramebuffer(GL_DRAW_FRAMEBUFFER, renderer->StagingFBO[fboIndex]));
 	GL(glBlitFramebuffer(0, 0, w, h, 0, 0, renderer->StagingWidth, renderer->StagingHeight, GL_COLOR_BUFFER_BIT, GL_LINEAR));
 
-	// Generate mipmaps for trilinear + anisotropic filtering
-	GL(glBindTexture(GL_TEXTURE_2D, renderer->StagingTexture[fboIndex]));
-	GL(glGenerateMipmap(GL_TEXTURE_2D));
-	GL(glBindTexture(GL_TEXTURE_2D, 0));
-
 	// 2. Draw directly on swapchain FBO (like q3vr — no staging render)
 	GL(glBindFramebuffer(GL_FRAMEBUFFER, swapchainFBO));
 	GL(glViewport(0, 0, w, h));
